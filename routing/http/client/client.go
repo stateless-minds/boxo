@@ -12,20 +12,20 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	ipns "github.com/ipfs/boxo/ipns"
-	"github.com/ipfs/boxo/routing/http/contentrouter"
-	"github.com/ipfs/boxo/routing/http/internal/drjson"
-	"github.com/ipfs/boxo/routing/http/server"
-	"github.com/ipfs/boxo/routing/http/types"
-	"github.com/ipfs/boxo/routing/http/types/iter"
-	jsontypes "github.com/ipfs/boxo/routing/http/types/json"
-	"github.com/ipfs/boxo/routing/http/types/ndjson"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	ipns "github.com/stateless-minds/boxo/ipns"
+	"github.com/stateless-minds/boxo/routing/http/contentrouter"
+	"github.com/stateless-minds/boxo/routing/http/internal/drjson"
+	"github.com/stateless-minds/boxo/routing/http/server"
+	"github.com/stateless-minds/boxo/routing/http/types"
+	"github.com/stateless-minds/boxo/routing/http/types/iter"
+	jsontypes "github.com/stateless-minds/boxo/routing/http/types/json"
+	"github.com/stateless-minds/boxo/routing/http/types/ndjson"
 )
 
 var (

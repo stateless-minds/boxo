@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	"github.com/ipfs/boxo/bitswap/network/internal"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	"github.com/stateless-minds/boxo/bitswap/network/internal"
 
 	cid "github.com/ipfs/go-cid"
 

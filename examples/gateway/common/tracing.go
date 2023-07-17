@@ -3,7 +3,7 @@ package common
 import (
 	"context"
 
-	"github.com/ipfs/boxo/tracing"
+	"github.com/stateless-minds/boxo/tracing"
 	"go.opentelemetry.io/contrib/propagators/autoprop"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"

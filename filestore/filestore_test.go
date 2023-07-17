@@ -7,13 +7,13 @@ import (
 	"os"
 	"testing"
 
-	dag "github.com/ipfs/boxo/ipld/merkledag"
+	dag "github.com/stateless-minds/boxo/ipld/merkledag"
 
-	blockstore "github.com/ipfs/boxo/blockstore"
-	posinfo "github.com/ipfs/boxo/filestore/posinfo"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	ipld "github.com/ipfs/go-ipld-format"
+	blockstore "github.com/stateless-minds/boxo/blockstore"
+	posinfo "github.com/stateless-minds/boxo/filestore/posinfo"
 )
 
 var bg = context.Background()

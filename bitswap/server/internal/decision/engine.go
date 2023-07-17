@@ -10,12 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	wl "github.com/ipfs/boxo/bitswap/client/wantlist"
-	"github.com/ipfs/boxo/bitswap/internal/defaults"
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	pb "github.com/ipfs/boxo/bitswap/message/pb"
-	bmetrics "github.com/ipfs/boxo/bitswap/metrics"
-	bstore "github.com/ipfs/boxo/blockstore"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -26,6 +20,12 @@ import (
 	process "github.com/jbenet/goprocess"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
+	wl "github.com/stateless-minds/boxo/bitswap/client/wantlist"
+	"github.com/stateless-minds/boxo/bitswap/internal/defaults"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	bmetrics "github.com/stateless-minds/boxo/bitswap/metrics"
+	bstore "github.com/stateless-minds/boxo/blockstore"
 )
 
 // TODO consider taking responsibility for other types of requests. For

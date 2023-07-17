@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ipfs/boxo/files"
 	mc "github.com/multiformats/go-multicodec"
+	"github.com/stateless-minds/boxo/files"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"

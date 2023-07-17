@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
-	bsbpm "github.com/ipfs/boxo/bitswap/client/internal/blockpresencemanager"
-	notifications "github.com/ipfs/boxo/bitswap/client/internal/notifications"
-	bspm "github.com/ipfs/boxo/bitswap/client/internal/peermanager"
-	bssession "github.com/ipfs/boxo/bitswap/client/internal/session"
-	bssim "github.com/ipfs/boxo/bitswap/client/internal/sessioninterestmanager"
-	"github.com/ipfs/boxo/bitswap/internal/testutil"
-	"github.com/ipfs/boxo/internal/test"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	peer "github.com/libp2p/go-libp2p/core/peer"
+	bsbpm "github.com/stateless-minds/boxo/bitswap/client/internal/blockpresencemanager"
+	notifications "github.com/stateless-minds/boxo/bitswap/client/internal/notifications"
+	bspm "github.com/stateless-minds/boxo/bitswap/client/internal/peermanager"
+	bssession "github.com/stateless-minds/boxo/bitswap/client/internal/session"
+	bssim "github.com/stateless-minds/boxo/bitswap/client/internal/sessioninterestmanager"
+	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
+	"github.com/stateless-minds/boxo/internal/test"
 )
 
 type fakeSession struct {

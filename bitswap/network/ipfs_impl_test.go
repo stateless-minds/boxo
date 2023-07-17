@@ -7,13 +7,6 @@ import (
 	"testing"
 	"time"
 
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	pb "github.com/ipfs/boxo/bitswap/message/pb"
-	bsnet "github.com/ipfs/boxo/bitswap/network"
-	"github.com/ipfs/boxo/bitswap/network/internal"
-	tn "github.com/ipfs/boxo/bitswap/testnet"
-	"github.com/ipfs/boxo/internal/test"
-	mockrouting "github.com/ipfs/boxo/routing/mock"
 	ds "github.com/ipfs/go-datastore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
@@ -23,6 +16,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/multiformats/go-multistream"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	bsnet "github.com/stateless-minds/boxo/bitswap/network"
+	"github.com/stateless-minds/boxo/bitswap/network/internal"
+	tn "github.com/stateless-minds/boxo/bitswap/testnet"
+	"github.com/stateless-minds/boxo/internal/test"
+	mockrouting "github.com/stateless-minds/boxo/routing/mock"
 )
 
 // Receiver is an interface for receiving messages from the GraphSyncNetwork.

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	iface "github.com/ipfs/boxo/coreiface"
-	opt "github.com/ipfs/boxo/coreiface/options"
 	"github.com/ipfs/go-cid"
 	mbase "github.com/multiformats/go-multibase"
+	iface "github.com/stateless-minds/boxo/coreiface"
+	opt "github.com/stateless-minds/boxo/coreiface/options"
 )
 
 func (tp *TestSuite) TestKey(t *testing.T) {

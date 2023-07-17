@@ -37,7 +37,7 @@ The [release process](#release-process) below describes how maintainers perform 
 Boxo may release on Fridays or even weekends. This is in contrast to Kubo the deployable binary, which does not release on Fridays to avoid weekend surprises.
 
 ### Testing
-Boxo maintainers are in the process of moving tests into Boxo from Kubo (see [#275](https://github.com/ipfs/boxo/issues/275)) . Until that's done, Boxo releases rely on Kubo tests for extra confidence. As a result releases must plumb Boxo into Kubo and ensure its tests pass. See [Release Process](#release-process) for details.
+Boxo maintainers are in the process of moving tests into Boxo from Kubo (see [#275](https://github.com/stateless-minds/boxo/issues/275)) . Until that's done, Boxo releases rely on Kubo tests for extra confidence. As a result releases must plumb Boxo into Kubo and ensure its tests pass. See [Release Process](#release-process) for details.
 
 ### Changelogs
 Boxo loosely follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format. New commits should add changelog entries into the `[Unreleased]` section so that there is no changelog scramble when a new version needs to be released.
@@ -45,18 +45,18 @@ Boxo loosely follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/
 We take to heart the "guiding principle" that "changelogs are for humans, not machines.".  As a result:
 * Breaking changes and notable features are called out following the changelog emoji legend.
 * Changelog entries provide links to a relevant issue/PR so an interested party can learn more.
-We intend to use the standardized changelog to automate releases by onboarding with [Changelog Driven Release](https://github.com/pl-strflt/changelog-driven-release) (see [#269](https://github.com/ipfs/boxo/issues/269)).
+We intend to use the standardized changelog to automate releases by onboarding with [Changelog Driven Release](https://github.com/pl-strflt/changelog-driven-release) (see [#269](https://github.com/stateless-minds/boxo/issues/269)).
 
-At least as of 2023-06-08, changelog test is manually copied from [the changelog](CHANGELOG.md) to https://github.com/ipfs/boxo/releases.  This means that any updates to the changelog after a release need to be manually copied as well.
+At least as of 2023-06-08, changelog test is manually copied from [the changelog](CHANGELOG.md) to https://github.com/stateless-minds/boxo/releases.  This means that any updates to the changelog after a release need to be manually copied as well.
 
 ### Related Work
 Below are links of related/adjacent work that has informed some of the decisions in this document:
-1. https://github.com/ipfs/boxo/issues/170
+1. https://github.com/stateless-minds/boxo/issues/170
 2. https://pl-strflt.notion.site/Kubo-Release-Process-5a5d066264704009a28a79cff93062c4
 3. https://github.com/ipfs/kubo/blob/master/docs/RELEASE_ISSUE_TEMPLATE.md
 
 ## Release Process
-1. Create an issue for the version: https://github.com/ipfs/boxo/issues/new?title=Release+X.Y.Z (can be blank for now)
+1. Create an issue for the version: https://github.com/stateless-minds/boxo/issues/new?title=Release+X.Y.Z (can be blank for now)
 2. Pin the issue
 3. Copy-paste the following checklist into the description:
 
@@ -72,7 +72,7 @@ Below are links of related/adjacent work that has informed some of the decisions
 - [ ] If `Z > 0`, then cherry-pick the necessary commits from `master` into `release-vX.Y.Z` using `git cherry-pick -x <commit>`
 - [ ] Ensure Boxo tests are passing
 - [ ] Ensure Kubo tests are passing
-  - [ ] Go to Kubo dir and run `go get github.com/ipfs/boxo@<commit_hash>` using the commit hash of the `release-vX.Y.Z` branch
+  - [ ] Go to Kubo dir and run `go get github.com/stateless-minds/boxo@<commit_hash>` using the commit hash of the `release-vX.Y.Z` branch
   - [ ] Run `go mod tidy` in repo root and in `docs/examples/kubo-as-a-library`
   - [ ] Commit the changes and open a draft PR in Kubo
   - [ ] Name the PR "Upgrade to Boxo vX.Y.Z"

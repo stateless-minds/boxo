@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"sort"
 
-	pb "github.com/ipfs/boxo/filestore/pb"
+	pb "github.com/stateless-minds/boxo/filestore/pb"
 
-	dshelp "github.com/ipfs/boxo/datastore/dshelp"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
 	ipld "github.com/ipfs/go-ipld-format"
 	mh "github.com/multiformats/go-multihash"
+	dshelp "github.com/stateless-minds/boxo/datastore/dshelp"
 )
 
 // Status is used to identify the state of the block data referenced

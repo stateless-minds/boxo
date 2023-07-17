@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	opts "github.com/ipfs/boxo/coreiface/options/namesys"
-	"github.com/ipfs/boxo/ipns"
-	"github.com/ipfs/boxo/path"
-	offroute "github.com/ipfs/boxo/routing/offline"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	record "github.com/libp2p/go-libp2p-record"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
+	opts "github.com/stateless-minds/boxo/coreiface/options/namesys"
+	"github.com/stateless-minds/boxo/ipns"
+	"github.com/stateless-minds/boxo/path"
+	offroute "github.com/stateless-minds/boxo/routing/offline"
 )
 
 type mockResolver struct {

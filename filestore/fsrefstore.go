@@ -8,11 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	pb "github.com/ipfs/boxo/filestore/pb"
+	pb "github.com/stateless-minds/boxo/filestore/pb"
 
 	proto "github.com/gogo/protobuf/proto"
-	dshelp "github.com/ipfs/boxo/datastore/dshelp"
-	posinfo "github.com/ipfs/boxo/filestore/posinfo"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -20,6 +18,8 @@ import (
 	dsq "github.com/ipfs/go-datastore/query"
 	ipld "github.com/ipfs/go-ipld-format"
 	mh "github.com/multiformats/go-multihash"
+	dshelp "github.com/stateless-minds/boxo/datastore/dshelp"
+	posinfo "github.com/stateless-minds/boxo/filestore/posinfo"
 )
 
 // FilestorePrefix identifies the key prefix for FileManager blocks.

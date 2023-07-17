@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/boxo/path"
+	"github.com/stateless-minds/boxo/path"
 
-	dshelp "github.com/ipfs/boxo/datastore/dshelp"
-	"github.com/ipfs/boxo/ipns"
-	mockrouting "github.com/ipfs/boxo/routing/mock"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	testutil "github.com/libp2p/go-libp2p-testing/net"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	dshelp "github.com/stateless-minds/boxo/datastore/dshelp"
+	"github.com/stateless-minds/boxo/ipns"
+	mockrouting "github.com/stateless-minds/boxo/routing/mock"
 )
 
 type identity struct {

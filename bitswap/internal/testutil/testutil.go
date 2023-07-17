@@ -4,12 +4,12 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	"github.com/ipfs/boxo/bitswap/client/wantlist"
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	peer "github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stateless-minds/boxo/bitswap/client/wantlist"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
 )
 
 var blockGenerator = blocksutil.NewBlockGenerator()

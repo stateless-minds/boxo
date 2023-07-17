@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -18,14 +17,15 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/schema"
 	"github.com/multiformats/go-multihash"
+	bsfetcher "github.com/stateless-minds/boxo/fetcher/impl/blockservice"
 
-	merkledag "github.com/ipfs/boxo/ipld/merkledag"
-	dagmock "github.com/ipfs/boxo/ipld/merkledag/test"
-	path "github.com/ipfs/boxo/path"
-	"github.com/ipfs/boxo/path/resolver"
 	"github.com/ipfs/go-unixfsnode"
 	dagcbor "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	dagjson "github.com/ipld/go-ipld-prime/codec/dagjson"
+	merkledag "github.com/stateless-minds/boxo/ipld/merkledag"
+	dagmock "github.com/stateless-minds/boxo/ipld/merkledag/test"
+	path "github.com/stateless-minds/boxo/path"
+	"github.com/stateless-minds/boxo/path/resolver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

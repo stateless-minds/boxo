@@ -8,10 +8,10 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/ipfs/boxo/pinning/remote/client/openapi"
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multibase"
+	"github.com/stateless-minds/boxo/pinning/remote/client/openapi"
 
 	logging "github.com/ipfs/go-log/v2"
 )

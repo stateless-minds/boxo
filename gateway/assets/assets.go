@@ -12,7 +12,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 
-	ipfspath "github.com/ipfs/boxo/path"
+	ipfspath "github.com/stateless-minds/boxo/path"
 )
 
 //go:embed *.html *.css

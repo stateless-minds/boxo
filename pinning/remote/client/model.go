@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ipfs/boxo/pinning/remote/client/openapi"
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/stateless-minds/boxo/pinning/remote/client/openapi"
 )
 
 // PinGetter Getter for Pin object

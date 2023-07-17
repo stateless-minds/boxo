@@ -1,8 +1,8 @@
 package bitswap
 
 import (
-	"github.com/ipfs/boxo/bitswap/server"
-	"github.com/ipfs/boxo/bitswap/tracer"
+	"github.com/stateless-minds/boxo/bitswap/server"
+	"github.com/stateless-minds/boxo/bitswap/tracer"
 )
 
 type (

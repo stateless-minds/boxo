@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/boxo/routing/http/types"
-	"github.com/ipfs/boxo/routing/http/types/iter"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
+	"github.com/stateless-minds/boxo/routing/http/types"
+	"github.com/stateless-minds/boxo/routing/http/types/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

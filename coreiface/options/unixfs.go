@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	dag "github.com/ipfs/boxo/ipld/merkledag"
 	cid "github.com/ipfs/go-cid"
 	mh "github.com/multiformats/go-multihash"
+	dag "github.com/stateless-minds/boxo/ipld/merkledag"
 )
 
 type Layout int

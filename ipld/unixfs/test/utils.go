@@ -7,17 +7,17 @@ import (
 	"io"
 	"testing"
 
-	ft "github.com/ipfs/boxo/ipld/unixfs"
-	h "github.com/ipfs/boxo/ipld/unixfs/importer/helpers"
-	trickle "github.com/ipfs/boxo/ipld/unixfs/importer/trickle"
+	ft "github.com/stateless-minds/boxo/ipld/unixfs"
+	h "github.com/stateless-minds/boxo/ipld/unixfs/importer/helpers"
+	trickle "github.com/stateless-minds/boxo/ipld/unixfs/importer/trickle"
 
-	chunker "github.com/ipfs/boxo/chunker"
-	mdag "github.com/ipfs/boxo/ipld/merkledag"
-	mdagmock "github.com/ipfs/boxo/ipld/merkledag/test"
-	u "github.com/ipfs/boxo/util"
 	cid "github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	mh "github.com/multiformats/go-multihash"
+	chunker "github.com/stateless-minds/boxo/chunker"
+	mdag "github.com/stateless-minds/boxo/ipld/merkledag"
+	mdagmock "github.com/stateless-minds/boxo/ipld/merkledag/test"
+	u "github.com/stateless-minds/boxo/util"
 )
 
 // SizeSplitterGen creates a generator.

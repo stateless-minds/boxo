@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	bswl "github.com/ipfs/boxo/bitswap/client/wantlist"
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	pb "github.com/ipfs/boxo/bitswap/message/pb"
-	bsnet "github.com/ipfs/boxo/bitswap/network"
 	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	bswl "github.com/stateless-minds/boxo/bitswap/client/wantlist"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	bsnet "github.com/stateless-minds/boxo/bitswap/network"
 	"go.uber.org/zap"
 )
 

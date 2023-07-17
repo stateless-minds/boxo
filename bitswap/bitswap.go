@@ -4,20 +4,20 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ipfs/boxo/bitswap/client"
-	"github.com/ipfs/boxo/bitswap/internal/defaults"
-	"github.com/ipfs/boxo/bitswap/message"
-	"github.com/ipfs/boxo/bitswap/network"
-	"github.com/ipfs/boxo/bitswap/server"
-	"github.com/ipfs/boxo/bitswap/tracer"
 	"github.com/ipfs/go-metrics-interface"
+	"github.com/stateless-minds/boxo/bitswap/client"
+	"github.com/stateless-minds/boxo/bitswap/internal/defaults"
+	"github.com/stateless-minds/boxo/bitswap/message"
+	"github.com/stateless-minds/boxo/bitswap/network"
+	"github.com/stateless-minds/boxo/bitswap/server"
+	"github.com/stateless-minds/boxo/bitswap/tracer"
 
-	blockstore "github.com/ipfs/boxo/blockstore"
-	exchange "github.com/ipfs/boxo/exchange"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
+	blockstore "github.com/stateless-minds/boxo/blockstore"
+	exchange "github.com/stateless-minds/boxo/exchange"
 
 	"go.uber.org/multierr"
 )

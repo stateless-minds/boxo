@@ -1,5 +1,5 @@
 <h1 align="center">
-<img src="https://github.com/ipfs/boxo/assets/157609/3c5e7391-fbc2-405b-9efc-920f4fd13b39" alt="Boxo logo" title="Boxo logo" width="200">
+<img src="https://github.com/stateless-minds/boxo/assets/157609/3c5e7391-fbc2-405b-9efc-920f4fd13b39" alt="Boxo logo" title="Boxo logo" width="200">
 <br>
 BOXO: IPFS SDK for GO
 </h1>
@@ -7,8 +7,8 @@ BOXO: IPFS SDK for GO
 
 <hr />
 
-[![Go Test](https://github.com/ipfs/boxo/actions/workflows/go-test.yml/badge.svg)](https://github.com/ipfs/boxo/actions/workflows/go-test.yml)
-[![Go Docs](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/ipfs/boxo)
+[![Go Test](https://github.com/stateless-minds/boxo/actions/workflows/go-test.yml/badge.svg)](https://github.com/stateless-minds/boxo/actions/workflows/go-test.yml)
+[![Go Docs](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/stateless-minds/boxo)
 [![codecov](https://codecov.io/gh/ipfs/boxo/branch/main/graph/badge.svg?token=9eG7d8fbCB)](https://codecov.io/gh/ipfs/boxo)
 
 <!-- TOC -->
@@ -94,9 +94,9 @@ If you are migrating to Boxo, see [Migrating to Boxo](#migrating-to-boxo).
 Many Go modules under github.com/ipfs have moved here. Boxo provides a tool to ease this migration, which does most of the work for you:
 
 * `cd` into the root directory of your module (where the `go.mod` file is)
-* Run: `go run github.com/ipfs/boxo/cmd/boxo-migrate@latest update-imports`
+* Run: `go run github.com/stateless-minds/boxo/cmd/boxo-migrate@latest update-imports`
   * This will upgrade your module to Boxo v0.8.0 and rewrite your import paths
-* Run: `go run github.com/ipfs/boxo/cmd/boxo-migrate@latest check-dependencies`
+* Run: `go run github.com/stateless-minds/boxo/cmd/boxo-migrate@latest check-dependencies`
   * This will print unmaintained dependencies you still have
   * These aren't necessarily an immediate problem, but you should eventually get them out of your dependency graph
   
@@ -104,7 +104,7 @@ This tool only upgrades your module to Boxo v0.8.0, to minimize backwards-incomp
 
 We recommend upgrading to v0.8.0 first, and _then_ upgrading to the latest Boxo release.
 
-If you encounter any challenges, please [open an issue](https://github.com/ipfs/boxo/issues/new/choose) and Boxo maintainers will help you.
+If you encounter any challenges, please [open an issue](https://github.com/stateless-minds/boxo/issues/new/choose) and Boxo maintainers will help you.
 
 ### Deprecations & Breaking Changes
 See [RELEASE.md](./RELEASE.md).
@@ -143,7 +143,7 @@ If you have questions, feel free to open an issue. You can also find the Boxo ma
 TODO: fill this in.  New issues and PRs to this repo are usually looked at on a weekly basis as part of [Kubo triage](https://pl-strflt.notion.site/Kubo-Issue-Triage-Notes-7d4983e8cf294e07b3cc51b0c60ede9a).
 
 ### What are some projects that depend on this project?
-The exhaustive list is https://github.com/ipfs/boxo/network/dependents.  Some notable projects include:
+The exhaustive list is https://github.com/stateless-minds/boxo/network/dependents.  Some notable projects include:
 1. [Kubo](https://github.com/ipfs/kubo), an IPFS implementation in Go
 2. [Lotus](https://github.com/filecoin-project/lotus), a Filecoin implementation in Go
 3. [Bifrost Gateway](https://github.com/protocol/bifrost-gateway), a dedicated IPFS gateway
@@ -153,10 +153,10 @@ The exhaustive list is https://github.com/ipfs/boxo/network/dependents.  Some no
 See [CODEOWNERS](./docs/CODEOWNERS) for the current maintainers list.  Governance for graduating additional maintainers hasn't been established.  Repo permissions are all managed through [ipfs/github-mgmt](https://github.com/ipfs/github-mgmt).
 
 ### Why is this named "Boxo"?
-See https://github.com/ipfs/boxo/issues/215. 
+See https://github.com/stateless-minds/boxo/issues/215. 
 
 ### Additional Docs & FAQs
-See [the wiki](https://github.com/ipfs/boxo/wiki).
+See [the wiki](https://github.com/stateless-minds/boxo/wiki).
 
 ### License
 

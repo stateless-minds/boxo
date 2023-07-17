@@ -8,9 +8,9 @@ import (
 	gpath "path"
 	"strings"
 
-	opts "github.com/ipfs/boxo/coreiface/options/namesys"
-	path "github.com/ipfs/boxo/path"
 	dns "github.com/miekg/dns"
+	opts "github.com/stateless-minds/boxo/coreiface/options/namesys"
+	path "github.com/stateless-minds/boxo/path"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

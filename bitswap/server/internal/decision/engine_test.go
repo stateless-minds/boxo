@@ -13,11 +13,6 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/ipfs/boxo/bitswap/internal/testutil"
-	message "github.com/ipfs/boxo/bitswap/message"
-	pb "github.com/ipfs/boxo/bitswap/message/pb"
-	blockstore "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/boxo/internal/test"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -26,6 +21,11 @@ import (
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	libp2ptest "github.com/libp2p/go-libp2p/core/test"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
+	message "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	blockstore "github.com/stateless-minds/boxo/blockstore"
+	"github.com/stateless-minds/boxo/internal/test"
 )
 
 type peerTag struct {

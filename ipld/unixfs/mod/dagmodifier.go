@@ -8,15 +8,15 @@ import (
 	"errors"
 	"io"
 
-	ft "github.com/ipfs/boxo/ipld/unixfs"
-	help "github.com/ipfs/boxo/ipld/unixfs/importer/helpers"
-	trickle "github.com/ipfs/boxo/ipld/unixfs/importer/trickle"
-	uio "github.com/ipfs/boxo/ipld/unixfs/io"
+	ft "github.com/stateless-minds/boxo/ipld/unixfs"
+	help "github.com/stateless-minds/boxo/ipld/unixfs/importer/helpers"
+	trickle "github.com/stateless-minds/boxo/ipld/unixfs/importer/trickle"
+	uio "github.com/stateless-minds/boxo/ipld/unixfs/io"
 
-	chunker "github.com/ipfs/boxo/chunker"
-	mdag "github.com/ipfs/boxo/ipld/merkledag"
 	cid "github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
+	chunker "github.com/stateless-minds/boxo/chunker"
+	mdag "github.com/stateless-minds/boxo/ipld/merkledag"
 )
 
 // Common errors

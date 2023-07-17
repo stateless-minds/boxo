@@ -3,12 +3,12 @@
 package importer
 
 import (
-	bal "github.com/ipfs/boxo/ipld/unixfs/importer/balanced"
-	h "github.com/ipfs/boxo/ipld/unixfs/importer/helpers"
-	trickle "github.com/ipfs/boxo/ipld/unixfs/importer/trickle"
+	bal "github.com/stateless-minds/boxo/ipld/unixfs/importer/balanced"
+	h "github.com/stateless-minds/boxo/ipld/unixfs/importer/helpers"
+	trickle "github.com/stateless-minds/boxo/ipld/unixfs/importer/trickle"
 
-	chunker "github.com/ipfs/boxo/chunker"
 	ipld "github.com/ipfs/go-ipld-format"
+	chunker "github.com/stateless-minds/boxo/chunker"
 )
 
 // BuildDagFromReader creates a DAG given a DAGService and a Splitter

@@ -3,9 +3,9 @@ package iface
 import (
 	"context"
 
-	path "github.com/ipfs/boxo/coreiface/path"
+	path "github.com/stateless-minds/boxo/coreiface/path"
 
-	"github.com/ipfs/boxo/coreiface/options"
+	"github.com/stateless-minds/boxo/coreiface/options"
 )
 
 // Pin holds information about pinned resource

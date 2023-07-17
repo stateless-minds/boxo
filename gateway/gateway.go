@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ipfs/boxo/coreiface/path"
-	"github.com/ipfs/boxo/files"
-	"github.com/ipfs/boxo/gateway/assets"
-	"github.com/ipfs/boxo/ipld/unixfs"
 	"github.com/ipfs/go-cid"
+	"github.com/stateless-minds/boxo/coreiface/path"
+	"github.com/stateless-minds/boxo/files"
+	"github.com/stateless-minds/boxo/gateway/assets"
+	"github.com/stateless-minds/boxo/ipld/unixfs"
 )
 
 // Config is the configuration used when creating a new gateway handler.

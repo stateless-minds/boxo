@@ -3,14 +3,14 @@ package provider
 import (
 	"context"
 
-	blocks "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/boxo/fetcher"
-	fetcherhelpers "github.com/ipfs/boxo/fetcher/helpers"
-	pin "github.com/ipfs/boxo/pinning/pinner"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-cidutil"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	blocks "github.com/stateless-minds/boxo/blockstore"
+	"github.com/stateless-minds/boxo/fetcher"
+	fetcherhelpers "github.com/stateless-minds/boxo/fetcher/helpers"
+	pin "github.com/stateless-minds/boxo/pinning/pinner"
 )
 
 var logR = logging.Logger("reprovider.simple")

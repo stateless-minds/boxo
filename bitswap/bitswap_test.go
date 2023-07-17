@@ -9,13 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/boxo/bitswap"
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	"github.com/ipfs/boxo/bitswap/server"
-	testinstance "github.com/ipfs/boxo/bitswap/testinstance"
-	tn "github.com/ipfs/boxo/bitswap/testnet"
-	"github.com/ipfs/boxo/internal/test"
-	mockrouting "github.com/ipfs/boxo/routing/mock"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	detectrace "github.com/ipfs/go-detect-race"
@@ -25,6 +18,13 @@ import (
 	tu "github.com/libp2p/go-libp2p-testing/etc"
 	p2ptestutil "github.com/libp2p/go-libp2p-testing/netutil"
 	peer "github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stateless-minds/boxo/bitswap"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	"github.com/stateless-minds/boxo/bitswap/server"
+	testinstance "github.com/stateless-minds/boxo/bitswap/testinstance"
+	tn "github.com/stateless-minds/boxo/bitswap/testnet"
+	"github.com/stateless-minds/boxo/internal/test"
+	mockrouting "github.com/stateless-minds/boxo/routing/mock"
 )
 
 func isCI() bool {

@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ipfs/boxo/gateway/assets"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime/multicodec"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	mc "github.com/multiformats/go-multicodec"
+	"github.com/stateless-minds/boxo/gateway/assets"
 
 	// Ensure basic codecs are registered.
 	_ "github.com/ipld/go-ipld-prime/codec/cbor"

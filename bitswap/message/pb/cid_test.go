@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
+	u "github.com/stateless-minds/boxo/util"
 
-	pb "github.com/ipfs/boxo/bitswap/message/pb"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
 )
 
 func TestCID(t *testing.T) {

@@ -8,9 +8,6 @@ import (
 	"sort"
 	"time"
 
-	ipns_pb "github.com/ipfs/boxo/ipns/pb"
-	"github.com/ipfs/boxo/path"
-	"github.com/ipfs/boxo/util"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
@@ -18,6 +15,9 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ipns_pb "github.com/stateless-minds/boxo/ipns/pb"
+	"github.com/stateless-minds/boxo/path"
+	"github.com/stateless-minds/boxo/util"
 	"go.uber.org/multierr"
 	"google.golang.org/protobuf/proto"
 )

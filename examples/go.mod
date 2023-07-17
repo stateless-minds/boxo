@@ -1,9 +1,9 @@
-module github.com/ipfs/boxo/examples
+module github.com/stateless-minds/boxo/examples
 
 go 1.19
 
 require (
-	github.com/ipfs/boxo v0.8.0
+	github.com/stateless-minds/boxo v0.8.0
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-datastore v0.6.0
@@ -170,4 +170,4 @@ require (
 	nhooyr.io/websocket v1.8.7 // indirect
 )
 
-replace github.com/ipfs/boxo => ../
+replace github.com/stateless-minds/boxo => ../

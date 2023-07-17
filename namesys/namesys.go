@@ -20,8 +20,6 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	opts "github.com/ipfs/boxo/coreiface/options/namesys"
-	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -30,6 +28,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/miekg/dns"
 	madns "github.com/multiformats/go-multiaddr-dns"
+	opts "github.com/stateless-minds/boxo/coreiface/options/namesys"
+	"github.com/stateless-minds/boxo/path"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

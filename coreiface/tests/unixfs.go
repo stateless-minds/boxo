@@ -14,19 +14,19 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ipfs/boxo/coreiface/path"
+	"github.com/stateless-minds/boxo/coreiface/path"
 
-	coreiface "github.com/ipfs/boxo/coreiface"
-	"github.com/ipfs/boxo/coreiface/options"
+	coreiface "github.com/stateless-minds/boxo/coreiface"
+	"github.com/stateless-minds/boxo/coreiface/options"
 
-	"github.com/ipfs/boxo/files"
-	mdag "github.com/ipfs/boxo/ipld/merkledag"
-	"github.com/ipfs/boxo/ipld/unixfs"
-	"github.com/ipfs/boxo/ipld/unixfs/importer/helpers"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	ipld "github.com/ipfs/go-ipld-format"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/stateless-minds/boxo/files"
+	mdag "github.com/stateless-minds/boxo/ipld/merkledag"
+	"github.com/stateless-minds/boxo/ipld/unixfs"
+	"github.com/stateless-minds/boxo/ipld/unixfs/importer/helpers"
 )
 
 func (tp *TestSuite) TestUnixfs(t *testing.T) {

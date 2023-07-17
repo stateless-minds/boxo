@@ -3,10 +3,10 @@ package common
 import (
 	"net/http"
 
-	"github.com/ipfs/boxo/gateway"
-	"github.com/ipfs/boxo/gateway/assets"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/stateless-minds/boxo/gateway"
+	"github.com/stateless-minds/boxo/gateway/assets"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -52,7 +52,7 @@ func NewHandler(gwAPI gateway.IPFSBackend) http.Handler {
 		// Add an example menu item called 'Boxo', linking to our library.
 		Menu: []assets.MenuItem{
 			{
-				URL:   "https://github.com/ipfs/boxo",
+				URL:   "https://github.com/stateless-minds/boxo",
 				Title: "Boxo",
 			},
 		},

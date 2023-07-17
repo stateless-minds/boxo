@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	iface "github.com/ipfs/boxo/coreiface"
-	opt "github.com/ipfs/boxo/coreiface/options"
-	"github.com/ipfs/boxo/coreiface/path"
+	iface "github.com/stateless-minds/boxo/coreiface"
+	opt "github.com/stateless-minds/boxo/coreiface/options"
+	"github.com/stateless-minds/boxo/coreiface/path"
 
 	"github.com/ipfs/go-cid"
 	ipldcbor "github.com/ipfs/go-ipld-cbor"

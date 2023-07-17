@@ -15,19 +15,19 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/ipfs/boxo/ipld/merkledag"
-	mdpb "github.com/ipfs/boxo/ipld/merkledag/pb"
-	dstest "github.com/ipfs/boxo/ipld/merkledag/test"
+	. "github.com/stateless-minds/boxo/ipld/merkledag"
+	mdpb "github.com/stateless-minds/boxo/ipld/merkledag/pb"
+	dstest "github.com/stateless-minds/boxo/ipld/merkledag/test"
 
-	bserv "github.com/ipfs/boxo/blockservice"
-	bstest "github.com/ipfs/boxo/blockservice/test"
-	offline "github.com/ipfs/boxo/exchange/offline"
-	u "github.com/ipfs/boxo/util"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	prime "github.com/ipld/go-ipld-prime"
 	mh "github.com/multiformats/go-multihash"
+	bserv "github.com/stateless-minds/boxo/blockservice"
+	bstest "github.com/stateless-minds/boxo/blockservice/test"
+	offline "github.com/stateless-minds/boxo/exchange/offline"
+	u "github.com/stateless-minds/boxo/util"
 )
 
 var someCid cid.Cid = func() cid.Cid {

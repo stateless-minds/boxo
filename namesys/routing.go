@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	opts "github.com/ipfs/boxo/coreiface/options/namesys"
-	"github.com/ipfs/boxo/ipns"
-	"github.com/ipfs/boxo/path"
 	logging "github.com/ipfs/go-log/v2"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	opts "github.com/stateless-minds/boxo/coreiface/options/namesys"
+	"github.com/stateless-minds/boxo/ipns"
+	"github.com/stateless-minds/boxo/path"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

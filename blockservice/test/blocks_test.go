@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/ipfs/boxo/blockservice"
+	. "github.com/stateless-minds/boxo/blockservice"
 
-	blockstore "github.com/ipfs/boxo/blockstore"
-	offline "github.com/ipfs/boxo/exchange/offline"
-	u "github.com/ipfs/boxo/util"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	blockstore "github.com/stateless-minds/boxo/blockstore"
+	offline "github.com/stateless-minds/boxo/exchange/offline"
+	u "github.com/stateless-minds/boxo/util"
 )
 
 func newObject(data []byte) blocks.Block {

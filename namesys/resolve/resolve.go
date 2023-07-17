@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ipfs/boxo/path"
+	"github.com/stateless-minds/boxo/path"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ipfs/boxo/namesys"
+	"github.com/stateless-minds/boxo/namesys"
 )
 
 // ErrNoNamesys is an explicit error for when an IPFS node doesn't

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ipfs/boxo/blockservice"
-	"github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/boxo/examples/gateway/common"
-	"github.com/ipfs/boxo/gateway"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/stateless-minds/boxo/blockservice"
+	"github.com/stateless-minds/boxo/blockstore"
+	"github.com/stateless-minds/boxo/examples/gateway/common"
+	"github.com/stateless-minds/boxo/gateway"
 	"github.com/stretchr/testify/assert"
 )
 

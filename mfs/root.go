@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	dag "github.com/ipfs/boxo/ipld/merkledag"
-	ft "github.com/ipfs/boxo/ipld/unixfs"
+	dag "github.com/stateless-minds/boxo/ipld/merkledag"
+	ft "github.com/stateless-minds/boxo/ipld/unixfs"
 
 	ipld "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"

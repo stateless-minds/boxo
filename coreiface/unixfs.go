@@ -3,11 +3,11 @@ package iface
 import (
 	"context"
 
-	"github.com/ipfs/boxo/coreiface/options"
-	path "github.com/ipfs/boxo/coreiface/path"
+	"github.com/stateless-minds/boxo/coreiface/options"
+	path "github.com/stateless-minds/boxo/coreiface/path"
 
-	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/go-cid"
+	"github.com/stateless-minds/boxo/files"
 )
 
 type AddEvent struct {

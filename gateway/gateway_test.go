@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	ipath "github.com/ipfs/boxo/coreiface/path"
-	"github.com/ipfs/boxo/files"
-	"github.com/ipfs/boxo/namesys"
-	path "github.com/ipfs/boxo/path"
-	"github.com/ipfs/boxo/path/resolver"
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
+	ipath "github.com/stateless-minds/boxo/coreiface/path"
+	"github.com/stateless-minds/boxo/files"
+	"github.com/stateless-minds/boxo/namesys"
+	path "github.com/stateless-minds/boxo/path"
+	"github.com/stateless-minds/boxo/path/resolver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

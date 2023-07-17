@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/boxo/bitswap/internal/testutil"
-	"github.com/ipfs/boxo/internal/test"
 	cid "github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
+	"github.com/stateless-minds/boxo/internal/test"
 )
 
 type msg struct {

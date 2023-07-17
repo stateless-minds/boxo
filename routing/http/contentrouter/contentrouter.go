@@ -5,15 +5,15 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ipfs/boxo/routing/http/internal"
-	"github.com/ipfs/boxo/routing/http/types"
-	"github.com/ipfs/boxo/routing/http/types/iter"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
+	"github.com/stateless-minds/boxo/routing/http/internal"
+	"github.com/stateless-minds/boxo/routing/http/types"
+	"github.com/stateless-minds/boxo/routing/http/types/iter"
 )
 
 var logger = logging.Logger("service/contentrouting")
