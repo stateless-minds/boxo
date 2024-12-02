@@ -24,11 +24,10 @@ package hamt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
-
-	"golang.org/x/sync/errgroup"
 
 	format "github.com/stateless-minds/boxo/ipld/unixfs"
 	"github.com/stateless-minds/boxo/ipld/unixfs/internal"
@@ -36,8 +35,11 @@ import (
 	bitfield "github.com/ipfs/go-bitfield"
 	cid "github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
-	dag "github.com/stateless-minds/boxo/ipld/merkledag"
+	logging "github.com/ipfs/go-log/v2"
+	"golang.org/x/sync/errgroup"
 )
+
+var log = logging.Logger("unixfs-hamt")
 
 const (
 	// HashMurmur3 is the multiformats identifier for Murmur3
@@ -141,11 +143,11 @@ func NewHamtFromDag(dserv ipld.DAGService, nd ipld.Node) (*Shard, error) {
 	}
 
 	if fsn.Type() != format.THAMTShard {
-		return nil, fmt.Errorf("node was not a dir shard")
+		return nil, errors.New("node was not a dir shard")
 	}
 
 	if fsn.HashType() != HashMurmur3 {
-		return nil, fmt.Errorf("only murmur3 supported as hash function")
+		return nil, errors.New("only murmur3 supported as hash function")
 	}
 
 	size := int(fsn.Fanout())
@@ -429,8 +431,13 @@ type listCidsAndShards struct {
 func (ds *Shard) walkChildren(processLinkValues func(formattedLink *ipld.Link) error) (*listCidsAndShards, error) {
 	res := &listCidsAndShards{}
 
-	for idx, lnk := range ds.childer.links {
-		if nextShard := ds.childer.children[idx]; nextShard == nil {
+	for i, nextShard := range ds.childer.children {
+		if nextShard == nil {
+			lnk := ds.childer.link(i)
+			if lnk == nil {
+				log.Warnf("internal HAMT error: both link and shard nil at pos %d, dumping shard: %+v", i, *ds)
+				return nil, fmt.Errorf("internal HAMT error: both link and shard nil, check log")
+			}
 			lnkLinkType, err := ds.childLinkType(lnk)
 			if err != nil {
 				return nil, err
@@ -451,9 +458,8 @@ func (ds *Shard) walkChildren(processLinkValues func(formattedLink *ipld.Link) e
 			case shardLink:
 				res.cids = append(res.cids, lnk.Cid)
 			default:
-				return nil, fmt.Errorf("unsupported shard link type")
+				return nil, errors.New("unsupported shard link type")
 			}
-
 		} else {
 			if nextShard.val != nil {
 				formattedLink := &ipld.Link{
@@ -935,11 +941,11 @@ func (s *childer) each(ctx context.Context, cb func(*Shard) error) error {
 
 func (s *childer) check(sliceIndex int) error {
 	if sliceIndex >= len(s.children) || sliceIndex < 0 {
-		return fmt.Errorf("invalid index passed to operate children (likely corrupt bitfield)")
+		return errors.New("invalid index passed to operate children (likely corrupt bitfield)")
 	}
 
 	if len(s.children) != len(s.links) {
-		return fmt.Errorf("inconsistent lengths between children array and Links array")
+		return errors.New("inconsistent lengths between children array and Links array")
 	}
 
 	return nil

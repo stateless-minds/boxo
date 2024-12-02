@@ -9,17 +9,14 @@ import (
 	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log/v2"
 	peer "github.com/libp2p/go-libp2p/core/peer"
-	"github.com/stateless-minds/boxo/bitswap/client/internal"
-	bsbpm "github.com/stateless-minds/boxo/bitswap/client/internal/blockpresencemanager"
-	bsgetter "github.com/stateless-minds/boxo/bitswap/client/internal/getter"
-	notifications "github.com/stateless-minds/boxo/bitswap/client/internal/notifications"
-	bspm "github.com/stateless-minds/boxo/bitswap/client/internal/peermanager"
-	bssim "github.com/stateless-minds/boxo/bitswap/client/internal/sessioninterestmanager"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
-var log = logging.Logger("bs:sess")
-var sflog = log.Desugar()
+var (
+	log   = logging.Logger("bitswap/session")
+	sflog = log.Desugar()
+)
 
 const (
 	broadcastLiveWantsLimit = 64
@@ -72,7 +69,7 @@ type SessionPeerManager interface {
 // ProviderFinder is used to find providers for a given key
 type ProviderFinder interface {
 	// FindProvidersAsync searches for peers that provide the given CID
-	FindProvidersAsync(ctx context.Context, k cid.Cid) <-chan peer.ID
+	FindProvidersAsync(ctx context.Context, k cid.Cid, max int) <-chan peer.AddrInfo
 }
 
 // opType is the kind of operation that is being processed by the event loop
@@ -146,8 +143,8 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
-
+	self peer.ID,
+) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
 		sw:                  newSessionWants(broadcastLiveWantsLimit),
@@ -299,35 +296,46 @@ func (s *Session) run(ctx context.Context) {
 
 	s.idleTick = time.NewTimer(s.initialSearchDelay)
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
+	sessionSpan := trace.SpanFromContext(ctx)
 	for {
 		select {
 		case oper := <-s.incoming:
 			switch oper.op {
 			case opReceive:
 				// Received blocks
+				sessionSpan.AddEvent("Session.ReceiveOp")
 				s.handleReceive(oper.keys)
 			case opWant:
 				// Client wants blocks
+				sessionSpan.AddEvent("Session.WantOp")
 				s.wantBlocks(ctx, oper.keys)
 			case opCancel:
 				// Wants were cancelled
+				sessionSpan.AddEvent("Session.WantCancelOp")
 				s.sw.CancelPending(oper.keys)
 				s.sws.Cancel(oper.keys)
 			case opWantsSent:
 				// Wants were sent to a peer
+				sessionSpan.AddEvent("Session.WantsSentOp")
 				s.sw.WantsSent(oper.keys)
 			case opBroadcast:
 				// Broadcast want-haves to all peers
-				s.broadcast(ctx, oper.keys)
+				opCtx, span := internal.StartSpan(ctx, "Session.BroadcastOp")
+				s.broadcast(opCtx, oper.keys)
+				span.End()
 			default:
 				panic("unhandled operation")
 			}
 		case <-s.idleTick.C:
 			// The session hasn't received blocks for a while, broadcast
-			s.broadcast(ctx, nil)
+			opCtx, span := internal.StartSpan(ctx, "Session.IdleBroadcast")
+			s.broadcast(opCtx, nil)
+			span.End()
 		case <-s.periodicSearchTimer.C:
 			// Periodically search for a random live want
-			s.handlePeriodicSearch(ctx)
+			opCtx, span := internal.StartSpan(ctx, "Session.PeriodicSearch")
+			s.handlePeriodicSearch(opCtx)
+			span.End()
 		case baseTickDelay := <-s.tickDelayReqs:
 			// Set the base tick delay
 			s.baseTickDelay = baseTickDelay
@@ -389,11 +397,18 @@ func (s *Session) handlePeriodicSearch(ctx context.Context) {
 // findMorePeers attempts to find more peers for a session by searching for
 // providers for the given Cid
 func (s *Session) findMorePeers(ctx context.Context, c cid.Cid) {
+	// noop when provider finder is disabled
+	if s.providerFinder == nil {
+		return
+	}
 	go func(k cid.Cid) {
-		for p := range s.providerFinder.FindProvidersAsync(ctx, k) {
+		ctx, span := internal.StartSpan(ctx, "Session.FindMorePeers")
+		defer span.End()
+		for p := range s.providerFinder.FindProvidersAsync(ctx, k, 0) {
 			// When a provider indicates that it has a cid, it's equivalent to
 			// the providing peer sending a HAVE
-			s.sws.Update(p, nil, []cid.Cid{c}, nil)
+			span.AddEvent("FoundPeer")
+			s.sws.Update(p.ID, nil, []cid.Cid{c}, nil)
 		}
 	}(c)
 }

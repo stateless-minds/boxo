@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/ipfs/go-cid"
 	"github.com/stateless-minds/boxo/ipns"
+	"github.com/stateless-minds/boxo/path"
+	"github.com/ipfs/go-cid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -20,7 +21,7 @@ func (i *handler) serveIpnsRecord(ctx context.Context, w http.ResponseWriter, r 
 	ctx, span := spanTrace(ctx, "Handler.ServeIPNSRecord", trace.WithAttributes(attribute.String("path", rq.contentPath.String())))
 	defer span.End()
 
-	if rq.contentPath.Namespace() != "ipns" {
+	if rq.contentPath.Namespace() != path.IPNSNamespace {
 		err := fmt.Errorf("%s is not an IPNS link", rq.contentPath.String())
 		i.webError(w, r, err, http.StatusBadRequest)
 		return false

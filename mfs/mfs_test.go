@@ -11,7 +11,9 @@ import (
 	"math/rand"
 	"os"
 	gopath "path"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,8 +26,7 @@ import (
 	ft "github.com/stateless-minds/boxo/ipld/unixfs"
 	importer "github.com/stateless-minds/boxo/ipld/unixfs/importer"
 	uio "github.com/stateless-minds/boxo/ipld/unixfs/io"
-	path "github.com/stateless-minds/boxo/path"
-	u "github.com/stateless-minds/boxo/util"
+	"github.com/ipfs/go-test/random"
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -46,7 +47,7 @@ func getDagserv(t testing.TB) ipld.DAGService {
 }
 
 func getRandFile(t *testing.T, ds ipld.DAGService, size int64) ipld.Node {
-	r := io.LimitReader(u.NewTimeSeededRand(), size)
+	r := io.LimitReader(random.NewRand(), size)
 	return fileNodeFromReader(t, ds, r)
 }
 
@@ -59,7 +60,7 @@ func fileNodeFromReader(t *testing.T, ds ipld.DAGService, r io.Reader) ipld.Node
 }
 
 func mkdirP(t *testing.T, root *Directory, pth string) *Directory {
-	dirs := path.SplitList(pth)
+	dirs := strings.Split(pth, "/")
 	cur := root
 	for _, d := range dirs {
 		n, err := cur.Mkdir(d)
@@ -145,7 +146,7 @@ func assertFileAtPath(ds ipld.DAGService, root *Directory, expn ipld.Node, pth s
 		return dag.ErrNotProtobuf
 	}
 
-	parts := path.SplitList(pth)
+	parts := strings.Split(pth, "/")
 	cur := root
 	for i, d := range parts[:len(parts)-1] {
 		next, err := cur.Child(d)
@@ -188,7 +189,7 @@ func assertFileAtPath(ds ipld.DAGService, root *Directory, expn ipld.Node, pth s
 	}
 
 	if !bytes.Equal(out, expbytes) {
-		return fmt.Errorf("incorrect data at path")
+		return errors.New("incorrect data at path")
 	}
 	return nil
 }
@@ -213,7 +214,6 @@ func setupRoot(ctx context.Context, t testing.TB) (ipld.DAGService, *Root) {
 		fmt.Println("PUBLISHED: ", c)
 		return nil
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,19 @@ func TestMfsFile(t *testing.T) {
 	fi := fsn.(*File)
 
 	if fi.Type() != TFile {
-		t.Fatal("some is seriously wrong here")
+		t.Fatal("something is seriously wrong here")
+	}
+
+	if m, err := fi.Mode(); err != nil {
+		t.Fatal("failed to get file mode: ", err)
+	} else if m != 0 {
+		t.Fatal("mode should not be set on a new file")
+	}
+
+	if ts, err := fi.ModTime(); err != nil {
+		t.Fatal("failed to get file mtime: ", err)
+	} else if !ts.IsZero() {
+		t.Fatal("modification time should not be set on a new file")
 	}
 
 	wfd, err := fi.Open(Flags{Read: true, Write: true, Sync: true})
@@ -616,10 +628,243 @@ func TestMfsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if ts, err := fi.ModTime(); err != nil {
+		t.Fatal("failed to get file mtime: ", err)
+	} else if !ts.IsZero() {
+		t.Fatal("file with unset modification time should not update modification time")
+	}
+
 	// make sure we can get node. TODO: verify it later
 	_, err = fi.GetNode()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMfsModeAndModTime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ds, rt := setupRoot(ctx, t)
+	rootdir := rt.GetDirectory()
+	nd := getRandFile(t, ds, 1000)
+
+	err := rootdir.AddChild("file", nd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fsn, err := rootdir.Child("file")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fi := fsn.(*File)
+
+	if fi.Type() != TFile {
+		t.Fatal("something is seriously wrong here")
+	}
+
+	var mode os.FileMode
+	ts, _ := time.Now(), time.Time{}
+
+	// can set mode
+	if err = fi.SetMode(0644); err == nil {
+		if mode, err = fi.Mode(); mode != 0644 {
+			t.Fatal("failed to get correct mode of file")
+		}
+	}
+	if err != nil {
+		t.Fatal("failed to check file mode: ", err)
+	}
+
+	// can set last modification time
+	if err = fi.SetModTime(ts); err == nil {
+		ts2, err := fi.ModTime()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ts2.Equal(ts) {
+			t.Fatal("failed to get correct modification time of file")
+		}
+	}
+	if err != nil {
+		t.Fatal("failed to check file modification time: ", err)
+	}
+
+	// test modification time update after write (on closing file)
+	if runtime.GOOS == "windows" {
+		time.Sleep(3 * time.Second) // for os with low-res mod time.
+	}
+	wfd, err := fi.Open(Flags{Read: false, Write: true, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = wfd.Write([]byte("test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts2, err := fi.ModTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts2.After(ts) {
+		t.Fatal("modification time should be updated after file write")
+	}
+
+	// writeAt
+	ts = ts2
+	if runtime.GOOS == "windows" {
+		time.Sleep(3 * time.Second) // for os with low-res mod time.
+	}
+	wfd, err = fi.Open(Flags{Read: false, Write: true, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = wfd.WriteAt([]byte("test"), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts2, err = fi.ModTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts2.After(ts) {
+		t.Fatal("modification time should be updated after file writeAt")
+	}
+
+	// truncate (shrink)
+	ts = ts2
+	if runtime.GOOS == "windows" {
+		time.Sleep(3 * time.Second) // for os with low-res mod time.
+	}
+	wfd, err = fi.Open(Flags{Read: false, Write: true, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Truncate(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts2, err = fi.ModTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts2.After(ts) {
+		t.Fatal("modification time should be updated after file truncate (shrink)")
+	}
+
+	// truncate (expand)
+	ts = ts2
+	if runtime.GOOS == "windows" {
+		time.Sleep(3 * time.Second) // for os with low-res mod time.
+	}
+	wfd, err = fi.Open(Flags{Read: false, Write: true, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Truncate(1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wfd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts2, err = fi.ModTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts2.After(ts) {
+		t.Fatal("modification time should be updated after file truncate (expand)")
+	}
+}
+
+func TestMfsRawNodeSetModeAndMtime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, rt := setupRoot(ctx, t)
+	rootdir := rt.GetDirectory()
+
+	// Create raw-node file.
+	nd := dag.NewRawNode(random.Bytes(256))
+	_, err := ft.ExtractFSNode(nd)
+	if !errors.Is(err, ft.ErrNotProtoNode) {
+		t.Fatal("Expected non-proto node")
+	}
+
+	err = rootdir.AddChild("file", nd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fsn, err := rootdir.Child("file")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fi := fsn.(*File)
+	if fi.Type() != TFile {
+		t.Fatal("something is seriously wrong here")
+	}
+
+	// Check for expected error when getting mode and mtime.
+	_, err = fi.Mode()
+	if !errors.Is(err, ft.ErrNotProtoNode) {
+		t.Fatal("Expected non-proto node")
+	}
+	_, err = fi.ModTime()
+	if !errors.Is(err, ft.ErrNotProtoNode) {
+		t.Fatal("Expected non-proto node")
+	}
+
+	// Set and check mode.
+	err = fi.SetMode(0644)
+	if err != nil {
+		t.Fatalf("failed to set file mode: %s", err)
+	}
+	mode, err := fi.Mode()
+	if err != nil {
+		t.Fatalf("failed to check file mode: %s", err)
+	}
+	if mode != 0644 {
+		t.Fatal("failed to get correct mode of file, got", mode.String())
+	}
+
+	// Mtime should still be unset.
+	mtime, err := fi.ModTime()
+	if err != nil {
+		t.Fatalf("failed to get file modification time: %s", err)
+	}
+	if !mtime.IsZero() {
+		t.Fatalf("expected mtime to be unset")
+	}
+
+	// Set and check mtime.
+	now := time.Now()
+	err = fi.SetModTime(now)
+	if err != nil {
+		t.Fatalf("failed to set file modification time: %s", err)
+	}
+	mtime, err = fi.ModTime()
+	if err != nil {
+		t.Fatalf("failed to get file modification time: %s", err)
+	}
+	if !mtime.Equal(now) {
+		t.Fatal("failed to get correct modification time of file")
 	}
 }
 
@@ -644,7 +889,6 @@ func TestMfsDirListNames(t *testing.T) {
 	}
 
 	list, err := rootdir.ListNames(ctx)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +1053,7 @@ func actorWriteFile(d *Directory) error {
 		return err
 	}
 	if n != size {
-		return fmt.Errorf("didnt write enough")
+		return errors.New("didnt write enough")
 	}
 
 	return wfd.Close()
@@ -1050,7 +1294,7 @@ func readFile(rt *Root, path string, offset int64, buf []byte) error {
 		return err
 	}
 	if nread != len(buf) {
-		return fmt.Errorf("didn't read enough")
+		return errors.New("didn't read enough")
 	}
 
 	return fd.Close()
@@ -1111,7 +1355,7 @@ func writeFile(rt *Root, path string, transform func([]byte) []byte) error {
 
 	fi, ok := n.(*File)
 	if !ok {
-		return fmt.Errorf("expected to receive a file, but didnt get one")
+		return errors.New("expected to receive a file, but didnt get one")
 	}
 
 	fd, err := fi.Open(Flags{Read: true, Write: true, Sync: true})
@@ -1181,7 +1425,7 @@ func TestConcurrentWrites(t *testing.T) {
 						}
 						buf = make([]byte, 8)
 					} else if len(buf) != 8 {
-						errs <- fmt.Errorf("buf not the right size")
+						errs <- errors.New("buf not the right size")
 						return buf
 					}
 
@@ -1488,7 +1732,6 @@ func getFileHandle(r *Root, path string, create bool, builder cid.Builder) (*Fil
 }
 
 func FuzzMkdirAndWriteConcurrently(f *testing.F) {
-
 	testCases := []struct {
 		flush     bool
 		mkparents bool
@@ -1567,5 +1810,4 @@ func FuzzMkdirAndWriteConcurrently(f *testing.F) {
 			t.Logf("error writting to file from filepath %s: %s", filepath, err)
 		}
 	})
-
 }

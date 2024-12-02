@@ -12,17 +12,16 @@ import (
 	"testing"
 	"time"
 
-	blocks "github.com/ipfs/go-block-format"
-	protocol "github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
-
-	cid "github.com/ipfs/go-cid"
-	delay "github.com/ipfs/go-ipfs-delay"
 	"github.com/stateless-minds/boxo/bitswap"
 	bsnet "github.com/stateless-minds/boxo/bitswap/network"
 	testinstance "github.com/stateless-minds/boxo/bitswap/testinstance"
 	tn "github.com/stateless-minds/boxo/bitswap/testnet"
 	mockrouting "github.com/stateless-minds/boxo/routing/mock"
+	blocks "github.com/ipfs/go-block-format"
+	cid "github.com/ipfs/go-cid"
+	delay "github.com/ipfs/go-ipfs-delay"
+	"github.com/ipfs/go-test/random"
+	protocol "github.com/libp2p/go-libp2p/core/protocol"
 )
 
 type fetchFunc func(b *testing.B, bs *bitswap.Bitswap, ks []cid.Cid)
@@ -114,7 +113,7 @@ func BenchmarkFixedDelay(b *testing.B) {
 	}
 
 	out, _ := json.MarshalIndent(benchmarkLog, "", "  ")
-	_ = os.WriteFile("tmp/benchmark.json", out, 0666)
+	_ = os.WriteFile("tmp/benchmark.json", out, 0o666)
 	printResults(benchmarkLog)
 }
 
@@ -135,6 +134,7 @@ func BenchmarkFetchFromOldBitswap(b *testing.B) {
 	benchmarkLog = nil
 	fixedDelay := delay.Fixed(10 * time.Millisecond)
 	bstoreLatency := time.Duration(0)
+	router := mockrouting.NewServer()
 
 	for _, bch := range mixedBenches {
 		b.Run(bch.name, func(b *testing.B) {
@@ -142,17 +142,17 @@ func BenchmarkFetchFromOldBitswap(b *testing.B) {
 			oldSeedCount := bch.oldSeedCount
 			newSeedCount := bch.nodeCount - (fetcherCount + oldSeedCount)
 
-			net := tn.VirtualNetwork(mockrouting.NewServer(), fixedDelay)
+			net := tn.VirtualNetwork(fixedDelay)
 
 			// Simulate an older Bitswap node (old protocol ID) that doesn't
 			// send DONT_HAVE responses
 			oldProtocol := []protocol.ID{bsnet.ProtocolBitswapOneOne}
 			oldNetOpts := []bsnet.NetOpt{bsnet.SupportedProtocols(oldProtocol)}
 			oldBsOpts := []bitswap.Option{bitswap.SetSendDontHaves(false)}
-			oldNodeGenerator := testinstance.NewTestInstanceGenerator(net, oldNetOpts, oldBsOpts)
+			oldNodeGenerator := testinstance.NewTestInstanceGenerator(net, router, oldNetOpts, oldBsOpts)
 
 			// Regular new Bitswap node
-			newNodeGenerator := testinstance.NewTestInstanceGenerator(net, nil, nil)
+			newNodeGenerator := testinstance.NewTestInstanceGenerator(net, router, nil, nil)
 			var instances []testinstance.Instance
 
 			// Create new nodes (fetchers + seeds)
@@ -169,8 +169,8 @@ func BenchmarkFetchFromOldBitswap(b *testing.B) {
 			testinstance.ConnectInstances(instances)
 
 			// Generate blocks, with a smaller root block
-			rootBlock := testutil.GenerateBlocksOfSize(1, rootBlockSize)
-			blocks := testutil.GenerateBlocksOfSize(bch.blockCount, stdBlockSize)
+			rootBlock := random.BlocksOfSize(1, rootBlockSize)
+			blocks := random.BlocksOfSize(bch.blockCount, stdBlockSize)
 			blocks[0] = rootBlock[0]
 
 			// Run the distribution
@@ -182,28 +182,30 @@ func BenchmarkFetchFromOldBitswap(b *testing.B) {
 	}
 
 	out, _ := json.MarshalIndent(benchmarkLog, "", "  ")
-	_ = os.WriteFile("tmp/benchmark.json", out, 0666)
+	_ = os.WriteFile("tmp/benchmark.json", out, 0o666)
 	printResults(benchmarkLog)
 }
 
-const datacenterSpeed = 5 * time.Millisecond
-const fastSpeed = 60 * time.Millisecond
-const mediumSpeed = 200 * time.Millisecond
-const slowSpeed = 800 * time.Millisecond
-const superSlowSpeed = 4000 * time.Millisecond
-const datacenterDistribution = 3 * time.Millisecond
-const distribution = 20 * time.Millisecond
-const datacenterBandwidth = 125000000.0
-const datacenterBandwidthDeviation = 3000000.0
-const fastBandwidth = 1250000.0
-const fastBandwidthDeviation = 300000.0
-const mediumBandwidth = 500000.0
-const mediumBandwidthDeviation = 80000.0
-const slowBandwidth = 100000.0
-const slowBandwidthDeviation = 16500.0
-const rootBlockSize = 800
-const stdBlockSize = 8000
-const largeBlockSize = int64(256 * 1024)
+const (
+	datacenterSpeed              = 5 * time.Millisecond
+	fastSpeed                    = 60 * time.Millisecond
+	mediumSpeed                  = 200 * time.Millisecond
+	slowSpeed                    = 800 * time.Millisecond
+	superSlowSpeed               = 4000 * time.Millisecond
+	datacenterDistribution       = 3 * time.Millisecond
+	distribution                 = 20 * time.Millisecond
+	datacenterBandwidth          = 125000000.0
+	datacenterBandwidthDeviation = 3000000.0
+	fastBandwidth                = 1250000.0
+	fastBandwidthDeviation       = 300000.0
+	mediumBandwidth              = 500000.0
+	mediumBandwidthDeviation     = 80000.0
+	slowBandwidth                = 100000.0
+	slowBandwidthDeviation       = 16500.0
+	rootBlockSize                = 800
+	stdBlockSize                 = 8000
+	largeBlockSize               = int64(256 * 1024)
+)
 
 func BenchmarkRealWorld(b *testing.B) {
 	benchmarkLog = nil
@@ -240,7 +242,7 @@ func BenchmarkRealWorld(b *testing.B) {
 		subtestDistributeAndFetchRateLimited(b, 300, 200, slowNetworkDelay, slowBandwidthGenerator, stdBlockSize, bstoreLatency, allToAll, batchFetchAll)
 	})
 	out, _ := json.MarshalIndent(benchmarkLog, "", "  ")
-	_ = os.WriteFile("tmp/rw-benchmark.json", out, 0666)
+	_ = os.WriteFile("tmp/rw-benchmark.json", out, 0o666)
 	printResults(benchmarkLog)
 }
 
@@ -263,7 +265,7 @@ func BenchmarkDatacenter(b *testing.B) {
 		subtestDistributeAndFetchRateLimited(b, 3, 100, datacenterNetworkDelay, datacenterBandwidthGenerator, largeBlockSize, bstoreLatency, allToAll, unixfsFileFetch)
 	})
 	out, _ := json.MarshalIndent(benchmarkLog, "", "  ")
-	_ = os.WriteFile("tmp/rb-benchmark.json", out, 0666)
+	_ = os.WriteFile("tmp/rb-benchmark.json", out, 0o666)
 	printResults(benchmarkLog)
 }
 
@@ -292,31 +294,32 @@ func BenchmarkDatacenterMultiLeechMultiSeed(b *testing.B) {
 		numblks := 1000
 
 		for i := 0; i < b.N; i++ {
-			net := tn.RateLimitedVirtualNetwork(mockrouting.NewServer(), d, rateLimitGenerator)
+			net := tn.RateLimitedVirtualNetwork(d, rateLimitGenerator)
 
-			ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+			router := mockrouting.NewServer()
+			ig := testinstance.NewTestInstanceGenerator(net, router, nil, nil)
 			defer ig.Close()
 
 			instances := ig.Instances(numnodes)
-			blocks := testutil.GenerateBlocksOfSize(numblks, blockSize)
+			blocks := random.BlocksOfSize(numblks, int(blockSize))
 			runDistributionMulti(b, instances[:3], instances[3:], blocks, bstoreLatency, df, ff)
 		}
 	})
 
 	out, _ := json.MarshalIndent(benchmarkLog, "", "  ")
-	_ = os.WriteFile("tmp/rb-benchmark.json", out, 0666)
+	_ = os.WriteFile("tmp/rb-benchmark.json", out, 0o666)
 	printResults(benchmarkLog)
 }
 
 func subtestDistributeAndFetch(b *testing.B, numnodes, numblks int, d delay.D, bstoreLatency time.Duration, df distFunc, ff fetchFunc) {
 	for i := 0; i < b.N; i++ {
-		net := tn.VirtualNetwork(mockrouting.NewServer(), d)
-
-		ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+		net := tn.VirtualNetwork(d)
+		router := mockrouting.NewServer()
+		ig := testinstance.NewTestInstanceGenerator(net, router, nil, nil)
 
 		instances := ig.Instances(numnodes)
-		rootBlock := testutil.GenerateBlocksOfSize(1, rootBlockSize)
-		blocks := testutil.GenerateBlocksOfSize(numblks, stdBlockSize)
+		rootBlock := random.BlocksOfSize(1, rootBlockSize)
+		blocks := random.BlocksOfSize(numblks, stdBlockSize)
 		blocks[0] = rootBlock[0]
 		runDistribution(b, instances, blocks, bstoreLatency, df, ff)
 		ig.Close()
@@ -325,14 +328,14 @@ func subtestDistributeAndFetch(b *testing.B, numnodes, numblks int, d delay.D, b
 
 func subtestDistributeAndFetchRateLimited(b *testing.B, numnodes, numblks int, d delay.D, rateLimitGenerator tn.RateLimitGenerator, blockSize int64, bstoreLatency time.Duration, df distFunc, ff fetchFunc) {
 	for i := 0; i < b.N; i++ {
-		net := tn.RateLimitedVirtualNetwork(mockrouting.NewServer(), d, rateLimitGenerator)
-
-		ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+		net := tn.RateLimitedVirtualNetwork(d, rateLimitGenerator)
+		router := mockrouting.NewServer()
+		ig := testinstance.NewTestInstanceGenerator(net, router, nil, nil)
 		defer ig.Close()
 
 		instances := ig.Instances(numnodes)
-		rootBlock := testutil.GenerateBlocksOfSize(1, rootBlockSize)
-		blocks := testutil.GenerateBlocksOfSize(numblks, blockSize)
+		rootBlock := random.BlocksOfSize(1, rootBlockSize)
+		blocks := random.BlocksOfSize(numblks, int(blockSize))
 		blocks[0] = rootBlock[0]
 		runDistribution(b, instances, blocks, bstoreLatency, df, ff)
 	}
@@ -435,7 +438,7 @@ func runDistribution(b *testing.B, instances []testinstance.Instance, blocks []b
 
 func allToAll(b *testing.B, provs []testinstance.Instance, blocks []blocks.Block) {
 	for _, p := range provs {
-		if err := p.Blockstore().PutMany(context.Background(), blocks); err != nil {
+		if err := p.Blockstore.PutMany(context.Background(), blocks); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -450,10 +453,10 @@ func overlap1(b *testing.B, provs []testinstance.Instance, blks []blocks.Block) 
 	bill := provs[0]
 	jeff := provs[1]
 
-	if err := bill.Blockstore().PutMany(context.Background(), blks[:75]); err != nil {
+	if err := bill.Blockstore.PutMany(context.Background(), blks[:75]); err != nil {
 		b.Fatal(err)
 	}
-	if err := jeff.Blockstore().PutMany(context.Background(), blks[25:]); err != nil {
+	if err := jeff.Blockstore.PutMany(context.Background(), blks[25:]); err != nil {
 		b.Fatal(err)
 	}
 }
@@ -471,12 +474,12 @@ func overlap2(b *testing.B, provs []testinstance.Instance, blks []blocks.Block) 
 		even := i%2 == 0
 		third := i%3 == 0
 		if third || even {
-			if err := bill.Blockstore().Put(context.Background(), blk); err != nil {
+			if err := bill.Blockstore.Put(context.Background(), blk); err != nil {
 				b.Fatal(err)
 			}
 		}
 		if third || !even {
-			if err := jeff.Blockstore().Put(context.Background(), blk); err != nil {
+			if err := jeff.Blockstore.Put(context.Background(), blk); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -488,7 +491,7 @@ func overlap2(b *testing.B, provs []testinstance.Instance, blks []blocks.Block) 
 // but we're mostly just testing performance of the sync algorithm
 func onePeerPerBlock(b *testing.B, provs []testinstance.Instance, blks []blocks.Block) {
 	for _, blk := range blks {
-		err := provs[rand.Intn(len(provs))].Blockstore().Put(context.Background(), blk)
+		err := provs[rand.Intn(len(provs))].Blockstore.Put(context.Background(), blk)
 		if err != nil {
 			b.Fatal(err)
 		}

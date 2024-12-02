@@ -43,10 +43,6 @@ func TaskWorkerCount(count int) Option {
 	return Option{server.TaskWorkerCount(count)}
 }
 
-func ProvideEnabled(enabled bool) Option {
-	return Option{server.ProvideEnabled(enabled)}
-}
-
 func SetSendDontHaves(send bool) Option {
 	return Option{server.SetSendDontHaves(send)}
 }
@@ -59,12 +55,23 @@ func WithScoreLedger(scoreLedger server.ScoreLedger) Option {
 	return Option{server.WithScoreLedger(scoreLedger)}
 }
 
+func WithPeerLedger(peerLedger server.PeerLedger) Option {
+	return Option{server.WithPeerLedger(peerLedger)}
+}
+
 func WithTargetMessageSize(tms int) Option {
 	return Option{server.WithTargetMessageSize(tms)}
 }
 
 func WithTaskComparator(comparator server.TaskComparator) Option {
 	return Option{server.WithTaskComparator(comparator)}
+}
+
+// WithWantHaveReplaceSize sets the maximum size of a block in bytes up to
+// which the bitswap server will replace a WantHave with a WantBlock response.
+// See [server.WithWantHaveReplaceSize] for details.
+func WithWantHaveReplaceSize(size int) Option {
+	return Option{server.WithWantHaveReplaceSize(size)}
 }
 
 func ProviderSearchDelay(newProvSearchDelay time.Duration) Option {
@@ -79,6 +86,14 @@ func SetSimulateDontHavesOnTimeout(send bool) Option {
 	return Option{client.SetSimulateDontHavesOnTimeout(send)}
 }
 
+func WithBlockReceivedNotifier(brn client.BlockReceivedNotifier) Option {
+	return Option{client.WithBlockReceivedNotifier(brn)}
+}
+
+func WithoutDuplicatedBlockStats() Option {
+	return Option{client.WithoutDuplicatedBlockStats()}
+}
+
 func WithTracer(tap tracer.Tracer) Option {
 	// Only trace the server, both receive the same messages anyway
 	return Option{
@@ -86,4 +101,12 @@ func WithTracer(tap tracer.Tracer) Option {
 			bs.tracer = tap
 		}),
 	}
+}
+
+func WithClientOption(opt client.Option) Option {
+	return Option{opt}
+}
+
+func WithServerOption(opt server.Option) Option {
+	return Option{opt}
 }

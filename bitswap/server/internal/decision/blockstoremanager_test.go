@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	blockstore "github.com/stateless-minds/boxo/blockstore"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -14,9 +15,7 @@ import (
 	ds_sync "github.com/ipfs/go-datastore/sync"
 	delay "github.com/ipfs/go-ipfs-delay"
 	"github.com/ipfs/go-metrics-interface"
-	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
-	blockstore "github.com/stateless-minds/boxo/blockstore"
-	"github.com/stateless-minds/boxo/internal/test"
+	"github.com/ipfs/go-test/random"
 )
 
 func newBlockstoreManagerForTesting(
@@ -34,8 +33,6 @@ func newBlockstoreManagerForTesting(
 }
 
 func TestBlockstoreManagerNotFoundKey(t *testing.T) {
-	test.Flaky(t)
-
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
 	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
@@ -43,7 +40,7 @@ func TestBlockstoreManagerNotFoundKey(t *testing.T) {
 
 	bsm := newBlockstoreManagerForTesting(t, ctx, bstore, 5)
 
-	cids := testutil.GenerateCids(4)
+	cids := random.Cids(4)
 	sizes, err := bsm.getBlockSizes(ctx, cids)
 	if err != nil {
 		t.Fatal(err)
@@ -74,8 +71,6 @@ func TestBlockstoreManagerNotFoundKey(t *testing.T) {
 }
 
 func TestBlockstoreManager(t *testing.T) {
-	test.Flaky(t)
-
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
 	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
@@ -103,29 +98,22 @@ func TestBlockstoreManager(t *testing.T) {
 		cids = append(cids, b.Cid())
 	}
 
-	sizes, err := bsm.getBlockSizes(ctx, cids)
+	hasBlocks, err := bsm.hasBlocks(ctx, cids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sizes) != len(blks)-1 {
+	if len(hasBlocks) != len(blks)-1 {
 		t.Fatal("Wrong response length")
 	}
-
 	for _, c := range cids {
-		expSize := len(exp[c].RawData())
-		size, ok := sizes[c]
-
-		// Only the last key should be missing
+		_, ok := hasBlocks[c]
 		if c.Equals(cids[len(cids)-1]) {
 			if ok {
 				t.Fatal("Non-existent block should not be in sizes map")
 			}
 		} else {
 			if !ok {
-				t.Fatal("Block should be in sizes map")
-			}
-			if size != expSize {
-				t.Fatal("Block has wrong size")
+				t.Fatal("Block should be in hasBlocks")
 			}
 		}
 	}
@@ -158,18 +146,16 @@ func TestBlockstoreManager(t *testing.T) {
 }
 
 func TestBlockstoreManagerConcurrency(t *testing.T) {
-	test.Flaky(t)
-
 	ctx := context.Background()
 	bsdelay := delay.Fixed(3 * time.Millisecond)
 	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
-	workerCount := 5
+	const workerCount = 5
 	bsm := newBlockstoreManagerForTesting(t, ctx, bstore, workerCount)
 
-	blkSize := int64(8 * 1024)
-	blks := testutil.GenerateBlocksOfSize(32, blkSize)
+	const blkSize = 8 * 1024
+	blks := random.BlocksOfSize(32, blkSize)
 	var ks []cid.Cid
 	for _, b := range blks {
 		ks = append(ks, b.Cid())
@@ -201,17 +187,15 @@ func TestBlockstoreManagerConcurrency(t *testing.T) {
 }
 
 func TestBlockstoreManagerClose(t *testing.T) {
-	test.Flaky(t)
-
 	ctx := context.Background()
-	delayTime := 20 * time.Millisecond
+	const delayTime = 20 * time.Millisecond
 	bsdelay := delay.Fixed(delayTime)
 	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
 	bstore := blockstore.NewBlockstore(ds_sync.MutexWrap(dstore))
 
 	bsm := newBlockstoreManagerForTesting(t, ctx, bstore, 3)
 
-	blks := testutil.GenerateBlocksOfSize(10, 1024)
+	blks := random.BlocksOfSize(10, 1024)
 	var ks []cid.Cid
 	for _, b := range blks {
 		ks = append(ks, b.Cid())
@@ -223,8 +207,6 @@ func TestBlockstoreManagerClose(t *testing.T) {
 	}
 
 	bsm.stop()
-
-	time.Sleep(5 * time.Millisecond)
 
 	before := time.Now()
 	_, err = bsm.getBlockSizes(ctx, ks)
@@ -238,9 +220,7 @@ func TestBlockstoreManagerClose(t *testing.T) {
 }
 
 func TestBlockstoreManagerCtxDone(t *testing.T) {
-	test.Flaky(t)
-
-	delayTime := 20 * time.Millisecond
+	const delayTime = 20 * time.Millisecond
 	bsdelay := delay.Fixed(delayTime)
 
 	underlyingDstore := ds_sync.MutexWrap(ds.NewMapDatastore())
@@ -251,7 +231,7 @@ func TestBlockstoreManagerCtxDone(t *testing.T) {
 	ctx := context.Background()
 	bsm := newBlockstoreManagerForTesting(t, ctx, bstore, 3)
 
-	blks := testutil.GenerateBlocksOfSize(100, 128)
+	blks := random.BlocksOfSize(100, 128)
 	var ks []cid.Cid
 	for _, b := range blks {
 		ks = append(ks, b.Cid())

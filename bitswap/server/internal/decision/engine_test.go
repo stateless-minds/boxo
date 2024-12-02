@@ -7,17 +7,22 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/benbjohnson/clock"
+	wl "github.com/stateless-minds/boxo/bitswap/client/wantlist"
+	message "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	blockstore "github.com/stateless-minds/boxo/blockstore"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	process "github.com/jbenet/goprocess"
+	"github.com/ipfs/go-test/random"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	libp2ptest "github.com/libp2p/go-libp2p/core/test"
 	mh "github.com/multiformats/go-multihash"
@@ -94,18 +99,16 @@ type engineSet struct {
 	Blockstore blockstore.Blockstore
 }
 
-func newTestEngine(ctx context.Context, idStr string, opts ...Option) engineSet {
-	return newTestEngineWithSampling(ctx, idStr, shortTerm, nil, clock.New(), opts...)
+func newTestEngine(idStr string, opts ...Option) engineSet {
+	return newTestEngineWithSampling(idStr, shortTerm, nil, clock.New(), opts...)
 }
 
-func newTestEngineWithSampling(ctx context.Context, idStr string, peerSampleInterval time.Duration, sampleCh chan struct{}, clock clock.Clock, opts ...Option) engineSet {
+func newTestEngineWithSampling(idStr string, peerSampleInterval time.Duration, sampleCh chan struct{}, clock clock.Clock, opts ...Option) engineSet {
 	fpt := &fakePeerTagger{}
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
-	e := newEngineForTesting(ctx, bs, fpt, "localhost", 0, append(opts[:len(opts):len(opts)], WithScoreLedger(NewTestScoreLedger(peerSampleInterval, sampleCh, clock)), WithBlockstoreWorkerCount(4))...)
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, fpt, "localhost", 0, append(opts[:len(opts):len(opts)], WithScoreLedger(NewTestScoreLedger(peerSampleInterval, sampleCh, clock)), WithBlockstoreWorkerCount(4))...)
 	return engineSet{
-		Peer: peer.ID(idStr),
-		//Strategy: New(true),
+		Peer:       peer.ID(idStr),
 		PeerTagger: fpt,
 		Blockstore: bs,
 		Engine:     e,
@@ -113,22 +116,19 @@ func newTestEngineWithSampling(ctx context.Context, idStr string, peerSampleInte
 }
 
 func TestConsistentAccounting(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sender := newTestEngine(ctx, "Ernie")
-	receiver := newTestEngine(ctx, "Bert")
+	sender := newTestEngine("Ernie")
+	defer sender.Engine.Close()
+	receiver := newTestEngine("Bert")
+	defer receiver.Engine.Close()
 
 	// Send messages from Ernie to Bert
 	for i := 0; i < 1000; i++ {
-
 		m := message.New(false)
 		content := []string{"this", "is", "message", "i"}
 		m.AddBlock(blocks.NewBlock([]byte(strings.Join(content, " "))))
 
 		sender.Engine.MessageSent(receiver.Peer, m)
-		receiver.Engine.MessageReceived(ctx, sender.Peer, m)
+		receiver.Engine.MessageReceived(context.Background(), sender.Peer, m)
 		receiver.Engine.ReceivedBlocks(sender.Peer, m.Blocks())
 	}
 
@@ -142,7 +142,7 @@ func TestConsistentAccounting(t *testing.T) {
 		t.Fatal("Inconsistent book-keeping. Strategies don't agree")
 	}
 
-	// Ensure sender didn't record receving anything. And that the receiver
+	// Ensure sender didn't record receiving anything. And that the receiver
 	// didn't record sending anything
 	if receiver.Engine.numBytesSentTo(sender.Peer) != 0 || sender.Engine.numBytesReceivedFrom(receiver.Peer) != 0 {
 		t.Fatal("Bert didn't send bytes to Ernie")
@@ -150,19 +150,17 @@ func TestConsistentAccounting(t *testing.T) {
 }
 
 func TestPeerIsAddedToPeersWhenMessageSent(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sanfrancisco := newTestEngine(ctx, "sf")
-	seattle := newTestEngine(ctx, "sea")
+	sanfrancisco := newTestEngine("sf")
+	defer sanfrancisco.Engine.Close()
+	seattle := newTestEngine("sea")
+	defer seattle.Engine.Close()
 
 	m := message.New(true)
 
 	// We need to request something for it to add us as partner.
 	m.AddEntry(blocks.NewBlock([]byte("Hæ")).Cid(), 0, pb.Message_Wantlist_Block, true)
 
-	seattle.Engine.MessageReceived(ctx, sanfrancisco.Peer, m)
+	seattle.Engine.MessageReceived(context.Background(), sanfrancisco.Peer, m)
 
 	if seattle.Peer == sanfrancisco.Peer {
 		t.Fatal("Sanity Check: Peers have same Key!")
@@ -188,30 +186,20 @@ func peerIsPartner(p peer.ID, e *Engine) bool {
 }
 
 func newEngineForTesting(
-	ctx context.Context,
 	bs blockstore.Blockstore,
 	peerTagger PeerTagger,
 	self peer.ID,
-	maxReplaceSize int,
+	wantHaveReplaceSize int,
 	opts ...Option,
 ) *Engine {
-	return newEngine(
-		ctx,
-		bs,
-		peerTagger,
-		self,
-		maxReplaceSize,
-		opts...,
-	)
+	opts = append(opts, WithWantHaveReplaceSize(wantHaveReplaceSize))
+	return NewEngine(context.Background(), bs, peerTagger, self, opts...)
 }
 
 func TestOutboxClosedWhenEngineClosed(t *testing.T) {
-	test.Flaky(t)
-
 	t.SkipNow() // TODO implement *Engine.Close
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -228,10 +216,8 @@ func TestOutboxClosedWhenEngineClosed(t *testing.T) {
 }
 
 func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
-	test.Flaky(t)
-
-	alphabet := "abcdefghijklmnopqrstuvwxyz"
-	vowels := "aeiou"
+	const alphabet = "abcdefghijklmnopqrstuvwxyz"
+	const vowels = "aeiou"
 
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	for _, letter := range strings.Split(alphabet, "") {
@@ -540,9 +526,8 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 		testCases = onlyTestCases
 	}
 
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 	for i, testCase := range testCases {
 		t.Logf("Test case %d:", i)
 		for _, wl := range testCase.wls {
@@ -570,9 +555,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 }
 
 func TestPartnerWantHaveWantBlockActive(t *testing.T) {
-	test.Flaky(t)
-
-	alphabet := "abcdefghijklmnopqrstuvwxyz"
+	const alphabet = "abcdefghijklmnopqrstuvwxyz"
 
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	for _, letter := range strings.Split(alphabet, "") {
@@ -699,9 +682,8 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 		testCases = onlyTestCases
 	}
 
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 
 	var next envChan
 	for i, testCase := range testCases {
@@ -844,8 +826,6 @@ func formatPresencesDiff(presences []message.BlockPresence, expHaves []string, e
 }
 
 func TestPartnerWantsThenCancels(t *testing.T) {
-	test.Flaky(t)
-
 	numRounds := 10
 	if testing.Short() {
 		numRounds = 1
@@ -884,11 +864,10 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 		}
 	}
 
-	ctx := context.Background()
 	for i := 0; i < numRounds; i++ {
 		expected := make([][]string, 0, len(testcases))
-		e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-		e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+		e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+		defer e.Close()
 		for _, testcase := range testcases {
 			set := testcase[0]
 			cancels := testcase[1]
@@ -908,17 +887,14 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 }
 
 func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
-	test.Flaky(t)
-
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := random.BlocksOfSize(4, 8*1024)
 	msg := message.New(false)
 	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
 	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
@@ -956,17 +932,14 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 }
 
 func TestSendDontHave(t *testing.T) {
-	test.Flaky(t)
-
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := random.BlocksOfSize(4, 8*1024)
 	msg := message.New(false)
 	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
 	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true)
@@ -1024,17 +997,14 @@ func TestSendDontHave(t *testing.T) {
 }
 
 func TestWantlistForPeer(t *testing.T) {
-	test.Flaky(t)
-
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	ctx := context.Background()
-	e := newEngineForTesting(ctx, bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	e := newEngineForTesting(bs, &fakePeerTagger{}, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4))
+	defer e.Close()
 
-	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
+	blks := random.BlocksOfSize(4, 8*1024)
 	msg := message.New(false)
 	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false)
 	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
@@ -1063,11 +1033,6 @@ func TestWantlistForPeer(t *testing.T) {
 }
 
 func TestTaskComparator(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
 	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
 	cids := make(map[cid.Cid]int)
 	blks := make([]blocks.Block, 0, len(keys))
@@ -1080,19 +1045,22 @@ func TestTaskComparator(t *testing.T) {
 	fpt := &fakePeerTagger{}
 	sl := NewTestScoreLedger(shortTerm, nil, clock.New())
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
 	if err := bs.PutMany(ctx, blks); err != nil {
 		t.Fatal(err)
 	}
 
 	// use a single task worker so that the order of outgoing messages is deterministic
-	e := newEngineForTesting(ctx, bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4), WithTaskWorkerCount(1),
+	e := newEngineForTesting(bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4), WithTaskWorkerCount(1),
 		// if this Option is omitted, the test fails
 		WithTaskComparator(func(ta, tb *TaskInfo) bool {
 			// prioritize based on lexicographic ordering of block content
 			return cids[ta.Cid] < cids[tb.Cid]
 		}),
 	)
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	defer e.Close()
 
 	// rely on randomness of Go map's iteration order to add Want entries in random order
 	peerIDs := make([]peer.ID, len(keys))
@@ -1119,11 +1087,6 @@ func TestTaskComparator(t *testing.T) {
 }
 
 func TestPeerBlockFilter(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
 	// Generate a few keys
 	keys := []string{"a", "b", "c", "d"}
 	blks := make([]blocks.Block, 0, len(keys))
@@ -1142,11 +1105,14 @@ func TestPeerBlockFilter(t *testing.T) {
 	fpt := &fakePeerTagger{}
 	sl := NewTestScoreLedger(shortTerm, nil, clock.New())
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
 	if err := bs.PutMany(ctx, blks); err != nil {
 		t.Fatal(err)
 	}
 
-	e := newEngineForTesting(ctx, bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4),
+	e := newEngineForTesting(bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4),
 		WithPeerBlockRequestFilter(func(p peer.ID, c cid.Cid) bool {
 			// peer 0 has access to everything
 			if p == peerIDs[0] {
@@ -1160,7 +1126,7 @@ func TestPeerBlockFilter(t *testing.T) {
 			return blks[3].Cid().Equals(c)
 		}),
 	)
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	defer e.Close()
 
 	// Setup the test
 	type testCaseEntry struct {
@@ -1280,11 +1246,6 @@ func TestPeerBlockFilter(t *testing.T) {
 }
 
 func TestPeerBlockFilterMutability(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
 	// Generate a few keys
 	keys := []string{"a", "b", "c", "d"}
 	blks := make([]blocks.Block, 0, len(keys))
@@ -1299,18 +1260,21 @@ func TestPeerBlockFilterMutability(t *testing.T) {
 	fpt := &fakePeerTagger{}
 	sl := NewTestScoreLedger(shortTerm, nil, clock.New())
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
 	if err := bs.PutMany(ctx, blks); err != nil {
 		t.Fatal(err)
 	}
 
 	filterAllowList := make(map[cid.Cid]bool)
 
-	e := newEngineForTesting(ctx, bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4),
+	e := newEngineForTesting(bs, fpt, "localhost", 0, WithScoreLedger(sl), WithBlockstoreWorkerCount(4),
 		WithPeerBlockRequestFilter(func(p peer.ID, c cid.Cid) bool {
 			return filterAllowList[c]
 		}),
 	)
-	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
+	defer e.Close()
 
 	// Setup the test
 	type testCaseEntry struct {
@@ -1451,12 +1415,10 @@ func TestPeerBlockFilterMutability(t *testing.T) {
 }
 
 func TestTaggingPeers(t *testing.T) {
-	test.Flaky(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	sanfrancisco := newTestEngine(ctx, "sf")
-	seattle := newTestEngine(ctx, "sea")
+	sanfrancisco := newTestEngine("sf")
+	defer sanfrancisco.Engine.Close()
+	seattle := newTestEngine("sea")
+	defer seattle.Engine.Close()
 
 	keys := []string{"a", "b", "c", "d", "e"}
 	for _, letter := range keys {
@@ -1481,16 +1443,12 @@ func TestTaggingPeers(t *testing.T) {
 }
 
 func TestTaggingUseful(t *testing.T) {
-	test.Flaky(t)
-
-	peerSampleIntervalHalf := 10 * time.Millisecond
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	const peerSampleIntervalHalf = 10 * time.Millisecond
 
 	sampleCh := make(chan struct{})
 	mockClock := clock.NewMock()
-	me := newTestEngineWithSampling(ctx, "engine", peerSampleIntervalHalf*2, sampleCh, mockClock)
+	me := newTestEngineWithSampling("engine", peerSampleIntervalHalf*2, sampleCh, mockClock)
+	defer me.Engine.Close()
 	mockClock.Add(1 * time.Millisecond)
 	friend := peer.ID("friend")
 
@@ -1578,9 +1536,6 @@ func partnerCancels(e *Engine, keys []string, partner peer.ID) {
 type envChan <-chan *Envelope
 
 func getNextEnvelope(e *Engine, next envChan, t time.Duration) (envChan, *Envelope) {
-	ctx, cancel := context.WithTimeout(context.Background(), t)
-	defer cancel()
-
 	if next == nil {
 		next = <-e.Outbox() // returns immediately
 	}
@@ -1592,7 +1547,7 @@ func getNextEnvelope(e *Engine, next envChan, t time.Duration) (envChan, *Envelo
 			return nil, nil
 		}
 		return nil, env
-	case <-ctx.Done():
+	case <-time.After(t):
 		// log.Warnf("got timeout")
 	}
 	return next, nil
@@ -1640,12 +1595,11 @@ func stringsComplement(set, subset []string) []string {
 }
 
 func TestWantlistDoesNotGrowPastLimit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	const limit = 32
-	warsaw := newTestEngine(ctx, "warsaw", WithMaxQueuedWantlistEntriesPerPeer(limit))
-	riga := newTestEngine(ctx, "riga")
+	warsaw := newTestEngine("warsaw", WithMaxQueuedWantlistEntriesPerPeer(limit))
+	defer warsaw.Engine.Close()
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
 
 	// Send in two messages to test reslicing.
 	for i := 2; i != 0; i-- {
@@ -1653,7 +1607,7 @@ func TestWantlistDoesNotGrowPastLimit(t *testing.T) {
 		for j := limit * 3 / 4; j != 0; j-- {
 			m.AddEntry(blocks.NewBlock([]byte(fmt.Sprint(i, j))).Cid(), 0, pb.Message_Wantlist_Block, true)
 		}
-		warsaw.Engine.MessageReceived(ctx, riga.Peer, m)
+		warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
 	}
 
 	if warsaw.Peer == riga.Peer {
@@ -1667,19 +1621,19 @@ func TestWantlistDoesNotGrowPastLimit(t *testing.T) {
 }
 
 func TestWantlistGrowsToLimit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	const limit = 32
-	warsaw := newTestEngine(ctx, "warsaw", WithMaxQueuedWantlistEntriesPerPeer(limit))
-	riga := newTestEngine(ctx, "riga")
+	warsaw := newTestEngine("warsaw", WithMaxQueuedWantlistEntriesPerPeer(limit))
+	defer warsaw.Engine.Close()
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
 
 	// Send in two messages to test reslicing.
 	m := message.New(false)
 	for j := limit; j != 0; j-- {
-		m.AddEntry(blocks.NewBlock([]byte(fmt.Sprint(j))).Cid(), 0, pb.Message_Wantlist_Block, true)
+		m.AddEntry(blocks.NewBlock([]byte(strconv.Itoa(j))).Cid(), 0, pb.Message_Wantlist_Block, true)
 	}
-	warsaw.Engine.MessageReceived(ctx, riga.Peer, m)
+
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
 
 	if warsaw.Peer == riga.Peer {
 		t.Fatal("Sanity Check: Peers have same Key!")
@@ -1692,12 +1646,11 @@ func TestWantlistGrowsToLimit(t *testing.T) {
 }
 
 func TestIgnoresCidsAboveLimit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	const cidLimit = 64
-	warsaw := newTestEngine(ctx, "warsaw", WithMaxCidSize(cidLimit))
-	riga := newTestEngine(ctx, "riga")
+	warsaw := newTestEngine("warsaw", WithMaxCidSize(cidLimit))
+	defer warsaw.Engine.Close()
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
 
 	// Send in two messages to test reslicing.
 	m := message.New(true)
@@ -1712,7 +1665,7 @@ func TestIgnoresCidsAboveLimit(t *testing.T) {
 	rand.Read(hash[startOfDigest:])
 	m.AddEntry(cid.NewCidV1(cid.Raw, hash), 0, pb.Message_Wantlist_Block, true)
 
-	warsaw.Engine.MessageReceived(ctx, riga.Peer, m)
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
 
 	if warsaw.Peer == riga.Peer {
 		t.Fatal("Sanity Check: Peers have same Key!")
@@ -1725,11 +1678,10 @@ func TestIgnoresCidsAboveLimit(t *testing.T) {
 }
 
 func TestKillConnectionForInlineCid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	warsaw := newTestEngine(ctx, "warsaw")
-	riga := newTestEngine(ctx, "riga")
+	warsaw := newTestEngine("warsaw")
+	defer warsaw.Engine.Close()
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
 
 	if warsaw.Peer == riga.Peer {
 		t.Fatal("Sanity Check: Peers have same Key!")
@@ -1749,7 +1701,7 @@ func TestKillConnectionForInlineCid(t *testing.T) {
 	rand.Read(hash[startOfDigest:])
 	m.AddEntry(cid.NewCidV1(cid.Raw, hash), 0, pb.Message_Wantlist_Block, true)
 
-	if !warsaw.Engine.MessageReceived(ctx, riga.Peer, m) {
+	if !warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m) {
 		t.Fatal("connection was not killed when receiving inline in cancel")
 	}
 
@@ -1758,7 +1710,236 @@ func TestKillConnectionForInlineCid(t *testing.T) {
 	m.AddEntry(blocks.NewBlock([]byte("Hæ")).Cid(), 0, pb.Message_Wantlist_Block, true)
 	m.Cancel(cid.NewCidV1(cid.Raw, hash))
 
-	if !warsaw.Engine.MessageReceived(ctx, riga.Peer, m) {
+	if !warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m) {
 		t.Fatal("connection was not killed when receiving inline in cancel")
 	}
+}
+
+func TestWantlistBlocked(t *testing.T) {
+	const limit = 32
+
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+
+	// Generate a set of blocks that the server has.
+	haveCids := make([]cid.Cid, limit)
+	var blockNum int
+	for blockNum < limit {
+		block := blocks.NewBlock([]byte(fmt.Sprint(blockNum)))
+		if blockNum != 0 { // do not put first block in blockstore.
+			if err := bs.Put(context.Background(), block); err != nil {
+				t.Fatal(err)
+			}
+		}
+		haveCids[blockNum] = block.Cid()
+		blockNum++
+	}
+
+	fpt := &fakePeerTagger{}
+	e := newEngineForTesting(bs, fpt, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4), WithMaxQueuedWantlistEntriesPerPeer(limit))
+	defer e.Close()
+
+	warsaw := engineSet{
+		Peer:       peer.ID("warsaw"),
+		PeerTagger: fpt,
+		Blockstore: bs,
+		Engine:     e,
+	}
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
+	if warsaw.Peer == riga.Peer {
+		t.Fatal("Sanity Check: Peers have same Key!")
+	}
+
+	m := message.New(false)
+	dontHaveCids := make([]cid.Cid, limit)
+	for i := 0; i < limit; i++ {
+		c := blocks.NewBlock([]byte(fmt.Sprint(blockNum))).Cid()
+		blockNum++
+		m.AddEntry(c, 1, pb.Message_Wantlist_Block, true)
+		dontHaveCids[i] = c
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl := warsaw.Engine.WantlistForPeer(riga.Peer)
+	// Check that all the dontHave wants are on the wantlist.
+	for _, c := range dontHaveCids {
+		if !findCid(c, wl) {
+			t.Fatal("Expected all dontHaveCids to be on wantlist")
+		}
+	}
+	t.Log("All", len(wl), "dont-have CIDs are on wantlist")
+
+	m = message.New(false)
+	for _, c := range haveCids {
+		m.AddEntry(c, 1, pb.Message_Wantlist_Block, true)
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl = warsaw.Engine.WantlistForPeer(riga.Peer)
+	// Check that all the dontHave wants are on the wantlist.
+	for _, c := range haveCids {
+		if !findCid(c, wl) {
+			t.Fatal("Missing expected want. Expected all haveCids to be on wantlist")
+		}
+	}
+	t.Log("All", len(wl), "new have CIDs are now on wantlist")
+
+	m = message.New(false)
+	for i := 0; i < limit; i++ {
+		c := blocks.NewBlock([]byte(fmt.Sprint(blockNum))).Cid()
+		blockNum++
+		m.AddEntry(c, 1, pb.Message_Wantlist_Block, true)
+		dontHaveCids[i] = c
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	// Check that all the new dontHave wants are not on the wantlist.
+	for _, c := range dontHaveCids {
+		if findCid(c, wl) {
+			t.Fatal("No new dontHaveCids should be on wantlist")
+		}
+	}
+	t.Log("All", len(wl), "new dont-have CIDs are not on wantlist")
+}
+
+func TestWantlistOverflow(t *testing.T) {
+	const limit = 32
+
+	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+
+	origCids := make([]cid.Cid, limit)
+	var blockNum int
+	m := message.New(false)
+	for blockNum < limit {
+		block := blocks.NewBlock([]byte(fmt.Sprint(blockNum)))
+		if blockNum != 0 { // do not put first block in blockstore.
+			if err := bs.Put(context.Background(), block); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.AddEntry(block.Cid(), 1, pb.Message_Wantlist_Block, true)
+		origCids[blockNum] = block.Cid()
+		blockNum++
+	}
+
+	fpt := &fakePeerTagger{}
+	e := newEngineForTesting(bs, fpt, "localhost", 0, WithScoreLedger(NewTestScoreLedger(shortTerm, nil, clock.New())), WithBlockstoreWorkerCount(4), WithMaxQueuedWantlistEntriesPerPeer(limit))
+	defer e.Close()
+	warsaw := engineSet{
+		Peer:       peer.ID("warsaw"),
+		PeerTagger: fpt,
+		Blockstore: bs,
+		Engine:     e,
+	}
+	riga := newTestEngine("riga")
+	defer riga.Engine.Close()
+	if warsaw.Peer == riga.Peer {
+		t.Fatal("Sanity Check: Peers have same Key!")
+	}
+
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	// Check that the wantlist is at the size limit.
+	wl := warsaw.Engine.WantlistForPeer(riga.Peer)
+	if len(wl) != limit {
+		t.Fatal("wantlist size", len(wl), "does not match limit", limit)
+	}
+	t.Log("Sent message with", limit, "medium-priority wants and", limit-1, "have blocks present")
+
+	m = message.New(false)
+	lowPrioCids := make([]cid.Cid, 5)
+	for i := 0; i < cap(lowPrioCids); i++ {
+		c := blocks.NewBlock([]byte(fmt.Sprint(blockNum))).Cid()
+		blockNum++
+		m.AddEntry(c, 0, pb.Message_Wantlist_Block, true)
+		lowPrioCids[i] = c
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl = warsaw.Engine.WantlistForPeer(riga.Peer)
+	if len(wl) != limit {
+		t.Fatal("wantlist size", len(wl), "does not match limit", limit)
+	}
+	// Check that one low priority entry is on the wantlist, since there is one
+	// existing entry without a blocks and none at a lower priority.
+	var count int
+	for _, c := range lowPrioCids {
+		if findCid(c, wl) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatal("Expected 1 low priority entry on wantlist, found", count)
+	}
+	t.Log("Sent message with", len(lowPrioCids), "low-priority wants. One accepted as replacement for existig want without block.")
+
+	m = message.New(false)
+	highPrioCids := make([]cid.Cid, 5)
+	for i := 0; i < cap(highPrioCids); i++ {
+		c := blocks.NewBlock([]byte(fmt.Sprint(blockNum))).Cid()
+		blockNum++
+		m.AddEntry(c, 10, pb.Message_Wantlist_Block, true)
+		highPrioCids[i] = c
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl = warsaw.Engine.WantlistForPeer(riga.Peer)
+	if len(wl) != limit {
+		t.Fatal("wantlist size", len(wl), "does not match limit", limit)
+	}
+	// Check that all high priority entries are all on wantlist, since there
+	// were existing entries with lower priority.
+	for _, c := range highPrioCids {
+		if !findCid(c, wl) {
+			t.Fatal("expected high priority entry on wantlist")
+		}
+	}
+	t.Log("Sent message with", len(highPrioCids), "high-priority wants. All accepted replacing wants without block or low priority.")
+
+	// These new wants should overflow and some of them should replace existing
+	// wants that do not have blocks (the high-priority weants from the
+	// previous message).
+	m = message.New(false)
+	blockCids := make([]cid.Cid, len(highPrioCids)+2)
+	for i := 0; i < cap(blockCids); i++ {
+		c := blocks.NewBlock([]byte(fmt.Sprint(blockNum))).Cid()
+		blockNum++
+		m.AddEntry(c, 0, pb.Message_Wantlist_Block, true)
+		blockCids[i] = c
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl = warsaw.Engine.WantlistForPeer(riga.Peer)
+	if len(wl) != limit {
+		t.Fatal("wantlist size", len(wl), "does not match limit", limit)
+	}
+
+	count = 0
+	for _, c := range blockCids {
+		if findCid(c, wl) {
+			count++
+		}
+	}
+	if count != len(highPrioCids) {
+		t.Fatal("expected", len(highPrioCids), "of the new blocks, found", count)
+	}
+	t.Log("Sent message with", len(blockCids), "low-priority wants.", count, "accepted replacing wants without blocks from previous message")
+
+	// Send the original wants. Some should replace the existing wants that do
+	// not have blocks associated, and the rest should overwrite the existing
+	// ones.
+	m = message.New(false)
+	for _, c := range origCids {
+		m.AddEntry(c, 0, pb.Message_Wantlist_Block, true)
+	}
+	warsaw.Engine.MessageReceived(context.Background(), riga.Peer, m)
+	wl = warsaw.Engine.WantlistForPeer(riga.Peer)
+	for _, c := range origCids {
+		if !findCid(c, wl) {
+			t.Fatal("missing low-priority original wants to overwrite existing")
+		}
+	}
+	t.Log("Sent message with", len(origCids), "original wants at low priority. All accepted overwriting existing wants.")
+}
+
+func findCid(c cid.Cid, wantList []wl.Entry) bool {
+	for i := range wantList {
+		if wantList[i].Cid == c {
+			return true
+		}
+	}
+	return false
 }

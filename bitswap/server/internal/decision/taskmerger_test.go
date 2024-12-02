@@ -5,14 +5,11 @@ import (
 
 	"github.com/ipfs/go-peertaskqueue"
 	"github.com/ipfs/go-peertaskqueue/peertask"
-	"github.com/stateless-minds/boxo/bitswap/internal/testutil"
-	"github.com/stateless-minds/boxo/internal/test"
+	"github.com/ipfs/go-test/random"
 )
 
 func TestPushHaveVsBlock(t *testing.T) {
-	test.Flaky(t)
-
-	partner := testutil.GeneratePeers(1)[0]
+	partner := random.Peers(1)[0]
 
 	wantHave := peertask.Task{
 		Topic:    "1",
@@ -64,9 +61,7 @@ func TestPushHaveVsBlock(t *testing.T) {
 }
 
 func TestPushSizeInfo(t *testing.T) {
-	test.Flaky(t)
-
-	partner := testutil.GeneratePeers(1)[0]
+	partner := random.Peers(1)[0]
 
 	wantBlockBlockSize := 10
 	wantBlockDontHaveBlockSize := 0
@@ -136,8 +131,8 @@ func TestPushSizeInfo(t *testing.T) {
 		}
 	}
 
-	isWantBlock := true
-	isWantHave := false
+	const isWantBlock = true
+	const isWantHave = false
 
 	// want-block (DONT_HAVE) should have no effect on existing want-block (DONT_HAVE)
 	runTestCase([]peertask.Task{wantBlockDontHave, wantBlockDontHave}, wantBlockDontHave.Work, wantBlockDontHaveBlockSize, isWantBlock)
@@ -178,9 +173,7 @@ func TestPushSizeInfo(t *testing.T) {
 }
 
 func TestPushHaveVsBlockActive(t *testing.T) {
-	test.Flaky(t)
-
-	partner := testutil.GeneratePeers(1)[0]
+	partner := random.Peers(1)[0]
 
 	wantBlock := peertask.Task{
 		Topic:    "1",
@@ -234,9 +227,7 @@ func TestPushHaveVsBlockActive(t *testing.T) {
 }
 
 func TestPushSizeInfoActive(t *testing.T) {
-	test.Flaky(t)
-
-	partner := testutil.GeneratePeers(1)[0]
+	partner := random.Peers(1)[0]
 
 	wantBlock := peertask.Task{
 		Topic:    "1",

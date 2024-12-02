@@ -11,7 +11,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/stateless-minds/boxo/blockservice"
+	offline "github.com/stateless-minds/boxo/exchange/offline"
+	"github.com/stateless-minds/boxo/files"
+	"github.com/stateless-minds/boxo/namesys"
+	"github.com/stateless-minds/boxo/path"
 	"github.com/ipfs/go-cid"
 	carblockstore "github.com/ipld/go-car/v2/blockstore"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -20,15 +26,12 @@ import (
 	nsopts "github.com/stateless-minds/boxo/coreiface/options/namesys"
 	ipath "github.com/stateless-minds/boxo/coreiface/path"
 	offline "github.com/stateless-minds/boxo/exchange/offline"
-	"github.com/stateless-minds/boxo/files"
-	"github.com/stateless-minds/boxo/namesys"
-	path "github.com/stateless-minds/boxo/path"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func mustNewRequest(t *testing.T, method string, path string, body io.Reader) *http.Request {
-	r, err := http.NewRequest(http.MethodGet, path, body)
+	r, err := http.NewRequest(method, path, body)
 	require.NoError(t, err)
 	return r
 }
@@ -52,43 +55,60 @@ func mustDo(t *testing.T, req *http.Request) *http.Response {
 	return res
 }
 
-type mockNamesys map[string]path.Path
+type mockNamesysItem struct {
+	path path.Path
+	ttl  time.Duration
+}
 
-func (m mockNamesys) Resolve(ctx context.Context, name string, opts ...nsopts.ResolveOpt) (value path.Path, err error) {
-	cfg := nsopts.DefaultResolveOpts()
+func newMockNamesysItem(p path.Path, ttl time.Duration) *mockNamesysItem {
+	return &mockNamesysItem{path: p, ttl: ttl}
+}
+
+type mockNamesys map[string]*mockNamesysItem
+
+func (m mockNamesys) Resolve(ctx context.Context, p path.Path, opts ...namesys.ResolveOption) (result namesys.Result, err error) {
+	cfg := namesys.DefaultResolveOptions()
 	for _, o := range opts {
 		o(&cfg)
 	}
 	depth := cfg.Depth
-	if depth == nsopts.UnlimitedDepth {
+	if depth == namesys.UnlimitedDepth {
 		// max uint
 		depth = ^uint(0)
 	}
+	var (
+		value path.Path
+		ttl   time.Duration
+	)
+	name := path.SegmentsToString(p.Segments()[:2]...)
 	for strings.HasPrefix(name, "/ipns/") {
 		if depth == 0 {
-			return value, namesys.ErrResolveRecursion
+			return namesys.Result{Path: value, TTL: ttl}, namesys.ErrResolveRecursion
 		}
 		depth--
 
-		var ok bool
-		value, ok = m[name]
+		v, ok := m[name]
 		if !ok {
-			return "", namesys.ErrResolveFailed
+			return namesys.Result{}, namesys.ErrResolveFailed
 		}
+		value = v.path
+		ttl = v.ttl
 		name = value.String()
 	}
-	return value, nil
+
+	value, err = path.Join(value, p.Segments()[2:]...)
+	return namesys.Result{Path: value, TTL: ttl}, err
 }
 
-func (m mockNamesys) ResolveAsync(ctx context.Context, name string, opts ...nsopts.ResolveOpt) <-chan namesys.Result {
-	out := make(chan namesys.Result, 1)
-	v, err := m.Resolve(ctx, name, opts...)
-	out <- namesys.Result{Path: v, Err: err}
+func (m mockNamesys) ResolveAsync(ctx context.Context, p path.Path, opts ...namesys.ResolveOption) <-chan namesys.AsyncResult {
+	out := make(chan namesys.AsyncResult, 1)
+	res, err := m.Resolve(ctx, p, opts...)
+	out <- namesys.AsyncResult{Path: res.Path, TTL: res.TTL, LastMod: res.LastMod, Err: err}
 	close(out)
 	return out
 }
 
-func (m mockNamesys) Publish(ctx context.Context, name crypto.PrivKey, value path.Path, opts ...nsopts.PublishOption) error {
+func (m mockNamesys) Publish(ctx context.Context, name crypto.PrivKey, value path.Path, opts ...namesys.PublishOption) error {
 	return errors.New("not implemented for mockNamesys")
 }
 
@@ -133,27 +153,27 @@ func newMockBackend(t *testing.T, fixturesFile string) (*mockBackend, cid.Cid) {
 	}, cids[0]
 }
 
-func (mb *mockBackend) Get(ctx context.Context, immutablePath ImmutablePath, ranges ...ByteRange) (ContentPathMetadata, *GetResponse, error) {
+func (mb *mockBackend) Get(ctx context.Context, immutablePath path.ImmutablePath, ranges ...ByteRange) (ContentPathMetadata, *GetResponse, error) {
 	return mb.gw.Get(ctx, immutablePath, ranges...)
 }
 
-func (mb *mockBackend) GetAll(ctx context.Context, immutablePath ImmutablePath) (ContentPathMetadata, files.Node, error) {
+func (mb *mockBackend) GetAll(ctx context.Context, immutablePath path.ImmutablePath) (ContentPathMetadata, files.Node, error) {
 	return mb.gw.GetAll(ctx, immutablePath)
 }
 
-func (mb *mockBackend) GetBlock(ctx context.Context, immutablePath ImmutablePath) (ContentPathMetadata, files.File, error) {
+func (mb *mockBackend) GetBlock(ctx context.Context, immutablePath path.ImmutablePath) (ContentPathMetadata, files.File, error) {
 	return mb.gw.GetBlock(ctx, immutablePath)
 }
 
-func (mb *mockBackend) Head(ctx context.Context, immutablePath ImmutablePath) (ContentPathMetadata, files.Node, error) {
+func (mb *mockBackend) Head(ctx context.Context, immutablePath path.ImmutablePath) (ContentPathMetadata, *HeadResponse, error) {
 	return mb.gw.Head(ctx, immutablePath)
 }
 
-func (mb *mockBackend) GetCAR(ctx context.Context, immutablePath ImmutablePath, params CarParams) (ContentPathMetadata, io.ReadCloser, error) {
+func (mb *mockBackend) GetCAR(ctx context.Context, immutablePath path.ImmutablePath, params CarParams) (ContentPathMetadata, io.ReadCloser, error) {
 	return mb.gw.GetCAR(ctx, immutablePath, params)
 }
 
-func (mb *mockBackend) ResolveMutable(ctx context.Context, p ipath.Path) (ImmutablePath, error) {
+func (mb *mockBackend) ResolveMutable(ctx context.Context, p path.Path) (path.ImmutablePath, time.Duration, time.Time, error) {
 	return mb.gw.ResolveMutable(ctx, p)
 }
 
@@ -161,49 +181,54 @@ func (mb *mockBackend) GetIPNSRecord(ctx context.Context, c cid.Cid) ([]byte, er
 	return nil, routing.ErrNotSupported
 }
 
-func (mb *mockBackend) GetDNSLinkRecord(ctx context.Context, hostname string) (ipath.Path, error) {
+func (mb *mockBackend) GetDNSLinkRecord(ctx context.Context, hostname string) (path.Path, error) {
 	if mb.namesys != nil {
-		p, err := mb.namesys.Resolve(ctx, "/ipns/"+hostname, nsopts.Depth(1))
+		p, err := path.NewPath("/ipns/" + hostname)
+		if err != nil {
+			return nil, err
+		}
+		res, err := mb.namesys.Resolve(ctx, p, namesys.ResolveWithDepth(1))
 		if err == namesys.ErrResolveRecursion {
 			err = nil
 		}
-		return ipath.New(p.String()), err
+		p = res.Path
+		return p, err
 	}
 
 	return nil, errors.New("not implemented")
 }
 
-func (mb *mockBackend) IsCached(ctx context.Context, p ipath.Path) bool {
+func (mb *mockBackend) IsCached(ctx context.Context, p path.Path) bool {
 	return mb.gw.IsCached(ctx, p)
 }
 
-func (mb *mockBackend) ResolvePath(ctx context.Context, immutablePath ImmutablePath) (ContentPathMetadata, error) {
+func (mb *mockBackend) ResolvePath(ctx context.Context, immutablePath path.ImmutablePath) (ContentPathMetadata, error) {
 	return mb.gw.ResolvePath(ctx, immutablePath)
 }
 
-func (mb *mockBackend) resolvePathNoRootsReturned(ctx context.Context, ip ipath.Path) (ipath.Resolved, error) {
-	var imPath ImmutablePath
+func (mb *mockBackend) resolvePathNoRootsReturned(ctx context.Context, ip path.Path) (path.ImmutablePath, error) {
+	var imPath path.ImmutablePath
 	var err error
 	if ip.Mutable() {
-		imPath, err = mb.ResolveMutable(ctx, ip)
+		imPath, _, _, err = mb.ResolveMutable(ctx, ip)
 		if err != nil {
-			return nil, err
+			return path.ImmutablePath{}, err
 		}
 	} else {
-		imPath, err = NewImmutablePath(ip)
+		imPath, err = path.NewImmutablePath(ip)
 		if err != nil {
-			return nil, err
+			return path.ImmutablePath{}, err
 		}
 	}
 
 	md, err := mb.ResolvePath(ctx, imPath)
 	if err != nil {
-		return nil, err
+		return path.ImmutablePath{}, err
 	}
 	return md.LastSegment, nil
 }
 
-func newTestServerAndNode(t *testing.T, ns mockNamesys, fixturesFile string) (*httptest.Server, *mockBackend, cid.Cid) {
+func newTestServerAndNode(t *testing.T, fixturesFile string) (*httptest.Server, *mockBackend, cid.Cid) {
 	backend, root := newMockBackend(t, fixturesFile)
 	ts := newTestServer(t, backend)
 	return ts, backend, root
@@ -211,19 +236,21 @@ func newTestServerAndNode(t *testing.T, ns mockNamesys, fixturesFile string) (*h
 
 func newTestServer(t *testing.T, backend IPFSBackend) *httptest.Server {
 	return newTestServerWithConfig(t, backend, Config{
-		Headers:               map[string][]string{},
 		DeserializedResponses: true,
 	})
 }
 
 func newTestServerWithConfig(t *testing.T, backend IPFSBackend, config Config) *httptest.Server {
-	AddAccessControlHeaders(config.Headers)
+	return newTestServerWithConfigAndHeaders(t, backend, config, map[string][]string{})
+}
 
+func newTestServerWithConfigAndHeaders(t *testing.T, backend IPFSBackend, config Config, headers map[string][]string) *httptest.Server {
 	handler := NewHandler(config, backend)
 	mux := http.NewServeMux()
 	mux.Handle("/ipfs/", handler)
 	mux.Handle("/ipns/", handler)
 	handler = NewHostnameHandler(config, backend, mux)
+	handler = NewHeaders(headers).ApplyCors().Wrap(handler)
 
 	ts := httptest.NewServer(handler)
 	t.Cleanup(func() { ts.Close() })

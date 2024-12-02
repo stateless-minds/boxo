@@ -11,7 +11,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	namespace "github.com/ipfs/go-datastore/namespace"
+	"github.com/ipfs/go-datastore/namespace"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multihash"
 	"github.com/stateless-minds/boxo/provider/internal/queue"
@@ -47,6 +47,7 @@ type reprovider struct {
 	initalReprovideDelay     time.Duration
 	initialReprovideDelaySet bool
 
+	allowlist   verifcid.Allowlist
 	rsys        Provide
 	keyProvider KeyChanFunc
 
@@ -90,8 +91,10 @@ type Ready interface {
 // BatchProvidingSystem instances
 type Option func(system *reprovider) error
 
-var lastReprovideKey = datastore.NewKey("/reprovide/lastreprovide")
-var DefaultKeyPrefix = datastore.NewKey("/provider")
+var (
+	lastReprovideKey = datastore.NewKey("/reprovide/lastreprovide")
+	DefaultKeyPrefix = datastore.NewKey("/provider")
+)
 
 // New creates a new [System]. By default it is offline, that means it will
 // enqueue tasks in ds.
@@ -102,6 +105,7 @@ var DefaultKeyPrefix = datastore.NewKey("/provider")
 // If provider casts to [Ready], it will wait until [Ready.Ready] is true.
 func New(ds datastore.Batching, opts ...Option) (System, error) {
 	s := &reprovider{
+		allowlist:             verifcid.DefaultAllowlist,
 		reprovideInterval:     DefaultReproviderInterval,
 		maxReprovideBatchSize: math.MaxUint,
 		keyPrefix:             DefaultKeyPrefix,
@@ -149,6 +153,13 @@ func New(ds datastore.Batching, opts ...Option) (System, error) {
 	return s, nil
 }
 
+func Allowlist(allowlist verifcid.Allowlist) Option {
+	return func(system *reprovider) error {
+		system.allowlist = allowlist
+		return nil
+	}
+}
+
 func ReproviderInterval(duration time.Duration) Option {
 	return func(system *reprovider) error {
 		system.reprovideInterval = duration
@@ -168,6 +179,17 @@ func KeyProvider(fn KeyChanFunc) Option {
 func DatastorePrefix(k datastore.Key) Option {
 	return func(system *reprovider) error {
 		system.keyPrefix = k
+		return nil
+	}
+}
+
+// MaxBatchSize limit how big each batch is.
+// Some content routers like acceleratedDHTClient have sub linear scalling and
+// bigger sizes are thus faster per elements however smaller batch sizes can
+// limit memory usage spike.
+func MaxBatchSize(n uint) Option {
+	return func(system *reprovider) error {
+		system.maxReprovideBatchSize = n
 		return nil
 	}
 }
@@ -194,7 +216,7 @@ type ThroughputCallback = func(reprovide bool, complete bool, totalKeysProvided 
 func Online(rsys Provide) Option {
 	return func(system *reprovider) error {
 		if system.rsys != nil {
-			return fmt.Errorf("trying to register two provider on the same reprovider")
+			return errors.New("trying to register two provider on the same reprovider")
 		}
 		system.rsys = rsys
 		return nil
@@ -294,7 +316,7 @@ func (s *reprovider) run() {
 				delete(m, c)
 
 				// hash security
-				if err := verifcid.ValidateCid(c); err != nil {
+				if err := verifcid.ValidateCid(s.allowlist, c); err != nil {
 					log.Errorf("insecure hash in reprovider, %s (%s)", c, err)
 					continue
 				}
@@ -414,7 +436,7 @@ func stopAndEmptyTimer(t *time.Timer) {
 }
 
 func storeTime(t time.Time) []byte {
-	val := []byte(fmt.Sprintf("%d", t.UnixNano()))
+	val := []byte(strconv.FormatInt(t.UnixNano(), 10))
 	return val
 }
 
@@ -433,7 +455,7 @@ func (s *reprovider) Close() error {
 	return err
 }
 
-func (s *reprovider) Provide(cid cid.Cid) error {
+func (s *reprovider) Provide(ctx context.Context, cid cid.Cid, announce bool) error {
 	return s.q.Enqueue(cid)
 }
 
@@ -490,7 +512,7 @@ func (s *reprovider) getLastReprovideTime() (time.Time, error) {
 		return time.Time{}, nil
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("could not get last reprovide time")
+		return time.Time{}, errors.New("could not get last reprovide time")
 	}
 
 	t, err := parseTime(val)

@@ -6,15 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
+	gourl "net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/benbjohnson/clock"
+	ipns "github.com/stateless-minds/boxo/ipns"
+	"github.com/stateless-minds/boxo/routing/http/contentrouter"
+	"github.com/stateless-minds/boxo/routing/http/filters"
+	"github.com/stateless-minds/boxo/routing/http/internal/drjson"
+	"github.com/stateless-minds/boxo/routing/http/types"
+	"github.com/stateless-minds/boxo/routing/http/types/iter"
+	jsontypes "github.com/stateless-minds/boxo/routing/http/types/json"
+	"github.com/stateless-minds/boxo/routing/http/types/ndjson"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
-	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -29,108 +39,164 @@ import (
 )
 
 var (
-	_                 contentrouter.Client = &client{}
-	logger                                 = logging.Logger("service/delegatedrouting")
-	defaultHTTPClient                      = &http.Client{
-		Transport: &ResponseBodyLimitedTransport{
-			RoundTripper: http.DefaultTransport,
-			LimitBytes:   1 << 20,
-			UserAgent:    defaultUserAgent,
-		},
-	}
+	_      contentrouter.Client = &Client{}
+	logger                      = logging.Logger("routing/http/client")
+
+	DefaultProtocolFilter = []string{"unknown", "transport-bitswap"} // IPIP-484
 )
 
 const (
-	mediaTypeJSON   = "application/json"
-	mediaTypeNDJSON = "application/x-ndjson"
+	mediaTypeJSON       = "application/json"
+	mediaTypeNDJSON     = "application/x-ndjson"
+	mediaTypeIPNSRecord = "application/vnd.ipfs.ipns-record"
 )
 
-type client struct {
+type Client struct {
 	baseURL    string
 	httpClient httpClient
-	validator  record.Validator
 	clock      clock.Clock
-
-	accepts string
+	accepts    string
 
 	peerID   peer.ID
 	addrs    []types.Multiaddr
 	identity crypto.PrivKey
 
-	// called immeidately after signing a provide req
-	// used for testing, e.g. testing the server with a mangled signature
-	afterSignCallback func(req *types.WriteBitswapProviderRecord)
+	// Called immediately after signing a provide request. It is used
+	// for testing, e.g., testing the server with a mangled signature.
+	//lint:ignore SA1019 // ignore staticcheck
+	afterSignCallback func(req *types.WriteBitswapRecord)
+
+	// disableLocalFiltering is used to disable local filtering of the results
+	disableLocalFiltering bool
+	protocolFilter        []string
+	addrFilter            []string
 }
 
 // defaultUserAgent is used as a fallback to inform HTTP server which library
 // version sent a request
 var defaultUserAgent = moduleVersion()
 
-var _ contentrouter.Client = &client{}
+var _ contentrouter.Client = &Client{}
+
+func newDefaultHTTPClient(userAgent string) *http.Client {
+	return &http.Client{
+		Transport: &ResponseBodyLimitedTransport{
+			RoundTripper: http.DefaultTransport,
+			LimitBytes:   1 << 20,
+			UserAgent:    userAgent,
+		},
+	}
+}
 
 type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-type Option func(*client)
+type Option func(*Client) error
 
 func WithIdentity(identity crypto.PrivKey) Option {
-	return func(c *client) {
+	return func(c *Client) error {
 		c.identity = identity
+		return nil
 	}
 }
 
+// WithDisabledLocalFiltering disables local filtering of the results.
+// This should be used for delegated routing servers that already implement filtering
+func WithDisabledLocalFiltering(val bool) Option {
+	return func(c *Client) error {
+		c.disableLocalFiltering = val
+		return nil
+	}
+}
+
+// WithProtocolFilter adds a protocol filter to the client.
+// The protocol filter is added to the request URL.
+// The protocols are ordered alphabetically for cache key (url) consistency
+func WithProtocolFilter(protocolFilter []string) Option {
+	return func(c *Client) error {
+		sort.Strings(protocolFilter)
+		c.protocolFilter = protocolFilter
+		return nil
+	}
+}
+
+// WithAddrFilter adds an address filter to the client.
+// The address filter is added to the request URL.
+// The addresses are ordered alphabetically for cache key (url) consistency
+func WithAddrFilter(addrFilter []string) Option {
+	return func(c *Client) error {
+		sort.Strings(addrFilter)
+		c.addrFilter = addrFilter
+		return nil
+	}
+}
+
+// WithHTTPClient sets a custom HTTP Client to be used with [Client].
 func WithHTTPClient(h httpClient) Option {
-	return func(c *client) {
+	return func(c *Client) error {
 		c.httpClient = h
+		return nil
 	}
 }
 
+// WithUserAgent sets a custom user agent to use with the HTTP Client. This modifies
+// the underlying [http.Client]. Therefore, you should not use the same HTTP Client
+// with multiple routing clients.
+//
+// This only works if using a [http.Client] with a [ResponseBodyLimitedTransport]
+// set as its transport. Otherwise, an error will be returned.
 func WithUserAgent(ua string) Option {
-	return func(c *client) {
+	return func(c *Client) error {
 		if ua == "" {
-			return
+			return errors.New("empty user agent")
 		}
 		httpClient, ok := c.httpClient.(*http.Client)
 		if !ok {
-			return
+			return errors.New("the http client of the Client must be a *http.Client")
 		}
 		transport, ok := httpClient.Transport.(*ResponseBodyLimitedTransport)
 		if !ok {
-			return
+			return errors.New("the transport of the http client of the Client must be a *ResponseBodyLimitedTransport")
 		}
 		transport.UserAgent = ua
+		return nil
 	}
 }
 
 func WithProviderInfo(peerID peer.ID, addrs []multiaddr.Multiaddr) Option {
-	return func(c *client) {
+	return func(c *Client) error {
 		c.peerID = peerID
 		for _, a := range addrs {
 			c.addrs = append(c.addrs, types.Multiaddr{Multiaddr: a})
 		}
+		return nil
 	}
 }
 
 func WithStreamResultsRequired() Option {
-	return func(c *client) {
+	return func(c *Client) error {
 		c.accepts = mediaTypeNDJSON
+		return nil
 	}
 }
 
 // New creates a content routing API client.
-// The Provider and identity parameters are option. If they are nil, the `Provide` method will not function.
-func New(baseURL string, opts ...Option) (*client, error) {
-	client := &client{
-		baseURL:    baseURL,
-		httpClient: defaultHTTPClient,
-		validator:  ipns.Validator{},
-		clock:      clock.New(),
-		accepts:    strings.Join([]string{mediaTypeNDJSON, mediaTypeJSON}, ","),
+// The Provider and identity parameters are option. If they are nil, the [client.ProvideBitswap] method will not function.
+func New(baseURL string, opts ...Option) (*Client, error) {
+	client := &Client{
+		baseURL:        baseURL,
+		httpClient:     newDefaultHTTPClient(defaultUserAgent),
+		clock:          clock.New(),
+		accepts:        strings.Join([]string{mediaTypeNDJSON, mediaTypeJSON}, ","),
+		protocolFilter: DefaultProtocolFilter, // can be customized via WithProtocolFilter
 	}
 
 	for _, opt := range opts {
-		opt(client)
+		err := opt(client)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if client.identity != nil && client.peerID.Size() != 0 && !client.peerID.MatchesPublicKey(client.identity.GetPublic()) {
@@ -162,11 +228,18 @@ func (c *measuringIter[T]) Close() error {
 	return c.Iter.Close()
 }
 
-func (c *client) FindProviders(ctx context.Context, key cid.Cid) (provs iter.ResultIter[types.ProviderResponse], err error) {
+// FindProviders searches for providers that are able to provide the given [cid.Cid].
+// In a more generic way, it is also used as a mapping between CIDs and relevant metadata.
+func (c *Client) FindProviders(ctx context.Context, key cid.Cid) (providers iter.ResultIter[types.Record], err error) {
 	// TODO test measurements
 	m := newMeasurement("FindProviders")
 
-	url := c.baseURL + server.ProvidePath + key.String()
+	url, err := gourl.JoinPath(c.baseURL, "routing/v1/providers", key.String())
+	if err != nil {
+		return nil, err
+	}
+	url = filters.AddFiltersToURL(url, c.protocolFilter, c.addrFilter)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -190,7 +263,7 @@ func (c *client) FindProviders(ctx context.Context, key cid.Cid) (provs iter.Res
 	if resp.StatusCode == http.StatusNotFound {
 		resp.Body.Close()
 		m.record(ctx)
-		return iter.FromSlice[iter.Result[types.ProviderResponse]](nil), nil
+		return iter.FromSlice[iter.Result[types.Record]](nil), nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -218,25 +291,32 @@ func (c *client) FindProviders(ctx context.Context, key cid.Cid) (provs iter.Res
 		}
 	}()
 
-	var it iter.ResultIter[types.ProviderResponse]
+	var it iter.ResultIter[types.Record]
 	switch mediaType {
 	case mediaTypeJSON:
-		parsedResp := &jsontypes.ReadProvidersResponse{}
+		parsedResp := &jsontypes.ProvidersResponse{}
 		err = json.NewDecoder(resp.Body).Decode(parsedResp)
-		var sliceIt iter.Iter[types.ProviderResponse] = iter.FromSlice(parsedResp.Providers)
+		var sliceIt iter.Iter[types.Record] = iter.FromSlice(parsedResp.Providers)
 		it = iter.ToResultIter(sliceIt)
 	case mediaTypeNDJSON:
 		skipBodyClose = true
-		it = ndjson.NewReadProvidersResponseIter(resp.Body)
+		it = ndjson.NewRecordsIter(resp.Body)
 	default:
 		logger.Errorw("unknown media type", "MediaType", mediaType, "ContentType", respContentType)
 		return nil, errors.New("unknown content type")
 	}
 
-	return &measuringIter[iter.Result[types.ProviderResponse]]{Iter: it, ctx: ctx, m: m}, nil
+	if !c.disableLocalFiltering {
+		it = filters.ApplyFiltersToIter(it, c.addrFilter, c.protocolFilter)
+	}
+
+	return &measuringIter[iter.Result[types.Record]]{Iter: it, ctx: ctx, m: m}, nil
 }
 
-func (c *client) ProvideBitswap(ctx context.Context, keys []cid.Cid, ttl time.Duration) (time.Duration, error) {
+// Deprecated: protocol-agnostic provide is being worked on in [IPIP-378]:
+//
+// [IPIP-378]: https://github.com/ipfs/specs/pull/378
+func (c *Client) ProvideBitswap(ctx context.Context, keys []cid.Cid, ttl time.Duration) (time.Duration, error) {
 	if c.identity == nil {
 		return 0, errors.New("cannot provide Bitswap records without an identity")
 	}
@@ -251,7 +331,7 @@ func (c *client) ProvideBitswap(ctx context.Context, keys []cid.Cid, ttl time.Du
 
 	now := c.clock.Now()
 
-	req := types.WriteBitswapProviderRecord{
+	req := types.WriteBitswapRecord{
 		Protocol: "transport-bitswap",
 		Schema:   types.SchemaBitswap,
 		Payload: types.BitswapPayload{
@@ -280,10 +360,13 @@ func (c *client) ProvideBitswap(ctx context.Context, keys []cid.Cid, ttl time.Du
 }
 
 // ProvideAsync makes a provide request to a delegated router
-func (c *client) provideSignedBitswapRecord(ctx context.Context, bswp *types.WriteBitswapProviderRecord) (time.Duration, error) {
-	req := jsontypes.WriteProvidersRequest{Providers: []types.WriteProviderRecord{bswp}}
+//
+//lint:ignore SA1019 // ignore staticcheck
+func (c *Client) provideSignedBitswapRecord(ctx context.Context, bswp *types.WriteBitswapRecord) (time.Duration, error) {
+	//lint:ignore SA1019 // ignore staticcheck
+	req := jsontypes.WriteProvidersRequest{Providers: []types.Record{bswp}}
 
-	url := c.baseURL + server.ProvidePath
+	url := c.baseURL + "/routing/v1/providers/"
 
 	b, err := drjson.MarshalJSONBytes(req)
 	if err != nil {
@@ -304,6 +387,8 @@ func (c *client) provideSignedBitswapRecord(ctx context.Context, bswp *types.Wri
 	if resp.StatusCode != http.StatusOK {
 		return 0, httpError(resp.StatusCode, resp.Body)
 	}
+
+	//lint:ignore SA1019 // ignore staticcheck
 	var provideResult jsontypes.WriteProvidersResponse
 	err = json.NewDecoder(resp.Body).Decode(&provideResult)
 	if err != nil {
@@ -313,9 +398,10 @@ func (c *client) provideSignedBitswapRecord(ctx context.Context, bswp *types.Wri
 		return 0, fmt.Errorf("expected 1 result but got %d", len(provideResult.ProvideResults))
 	}
 
-	v, ok := provideResult.ProvideResults[0].(*types.WriteBitswapProviderRecordResponse)
+	//lint:ignore SA1019 // ignore staticcheck
+	v, ok := provideResult.ProvideResults[0].(*types.WriteBitswapRecordResponse)
 	if !ok {
-		return 0, fmt.Errorf("expected AdvisoryTTL field")
+		return 0, errors.New("expected AdvisoryTTL field")
 	}
 
 	if v.AdvisoryTTL != nil {
@@ -323,4 +409,156 @@ func (c *client) provideSignedBitswapRecord(ctx context.Context, bswp *types.Wri
 	}
 
 	return 0, nil
+}
+
+// FindPeers searches for information for the given [peer.ID].
+func (c *Client) FindPeers(ctx context.Context, pid peer.ID) (peers iter.ResultIter[*types.PeerRecord], err error) {
+	m := newMeasurement("FindPeers")
+
+	url, err := gourl.JoinPath(c.baseURL, "routing/v1/peers", peer.ToCid(pid).String())
+	if err != nil {
+		return nil, err
+	}
+	url = filters.AddFiltersToURL(url, c.protocolFilter, c.addrFilter)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", c.accepts)
+
+	m.host = req.Host
+
+	start := c.clock.Now()
+	resp, err := c.httpClient.Do(req)
+
+	m.err = err
+	m.latency = c.clock.Since(start)
+
+	if err != nil {
+		m.record(ctx)
+		return nil, err
+	}
+
+	m.statusCode = resp.StatusCode
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		m.record(ctx)
+		return iter.FromSlice[iter.Result[*types.PeerRecord]](nil), nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		err := httpError(resp.StatusCode, resp.Body)
+		resp.Body.Close()
+		m.record(ctx)
+		return nil, err
+	}
+
+	respContentType := resp.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(respContentType)
+	if err != nil {
+		resp.Body.Close()
+		m.err = err
+		m.record(ctx)
+		return nil, fmt.Errorf("parsing Content-Type: %w", err)
+	}
+
+	m.mediaType = mediaType
+
+	var skipBodyClose bool
+	defer func() {
+		if !skipBodyClose {
+			resp.Body.Close()
+		}
+	}()
+
+	var it iter.ResultIter[*types.PeerRecord]
+	switch mediaType {
+	case mediaTypeJSON:
+		parsedResp := &jsontypes.PeersResponse{}
+		err = json.NewDecoder(resp.Body).Decode(parsedResp)
+		var sliceIt iter.Iter[*types.PeerRecord] = iter.FromSlice(parsedResp.Peers)
+		it = iter.ToResultIter(sliceIt)
+	case mediaTypeNDJSON:
+		skipBodyClose = true
+		it = ndjson.NewPeerRecordsIter(resp.Body)
+	default:
+		logger.Errorw("unknown media type", "MediaType", mediaType, "ContentType", respContentType)
+		return nil, errors.New("unknown content type")
+	}
+
+	if !c.disableLocalFiltering {
+		it = filters.ApplyFiltersToPeerRecordIter(it, c.addrFilter, c.protocolFilter)
+	}
+
+	return &measuringIter[iter.Result[*types.PeerRecord]]{Iter: it, ctx: ctx, m: m}, nil
+}
+
+// GetIPNS tries to retrieve the [ipns.Record] for the given [ipns.Name]. The record is
+// validated against the given name. If validation fails, an error is returned, but no
+// record.
+func (c *Client) GetIPNS(ctx context.Context, name ipns.Name) (*ipns.Record, error) {
+	url := c.baseURL + "/routing/v1/ipns/" + name.String()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Accept", mediaTypeIPNSRecord)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("making HTTP req to get IPNS record: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, httpError(resp.StatusCode, resp.Body)
+	}
+
+	// Limit the reader to the maximum record size.
+	rawRecord, err := io.ReadAll(io.LimitReader(resp.Body, int64(ipns.MaxRecordSize)))
+	if err != nil {
+		return nil, fmt.Errorf("making HTTP req to get IPNS record: %w", err)
+	}
+
+	record, err := ipns.UnmarshalRecord(rawRecord)
+	if err != nil {
+		return nil, fmt.Errorf("IPNS record from remote endpoint is not valid: %w", err)
+	}
+
+	err = ipns.ValidateWithName(record, name)
+	if err != nil {
+		return nil, fmt.Errorf("IPNS record from remote endpoint is not valid: %w", err)
+	}
+
+	return record, nil
+}
+
+// PutIPNS attempts at putting the given [ipns.Record] for the given [ipns.Name].
+func (c *Client) PutIPNS(ctx context.Context, name ipns.Name, record *ipns.Record) error {
+	url := c.baseURL + "/routing/v1/ipns/" + name.String()
+
+	rawRecord, err := ipns.MarshalRecord(record)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(rawRecord))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", mediaTypeIPNSRecord)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("making HTTP req to get IPNS record: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return httpError(resp.StatusCode, resp.Body)
+	}
+
+	return nil
 }
