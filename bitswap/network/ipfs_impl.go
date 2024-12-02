@@ -11,37 +11,33 @@ import (
 	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
 	"github.com/stateless-minds/boxo/bitswap/network/internal"
 
-	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	peerstore "github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
-	msgio "github.com/libp2p/go-msgio"
+	"github.com/libp2p/go-msgio"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multistream"
 )
 
-var log = logging.Logger("bitswap_network")
+var log = logging.Logger("bitswap/network")
 
-var connectTimeout = time.Second * 5
-
-var maxSendTimeout = 2 * time.Minute
-var minSendTimeout = 10 * time.Second
-var sendLatency = 2 * time.Second
-var minSendRate = (100 * 1000) / 8 // 100kbit/s
+var (
+	maxSendTimeout = 2 * time.Minute
+	minSendTimeout = 10 * time.Second
+	sendLatency    = 2 * time.Second
+	minSendRate    = (100 * 1000) / 8 // 100kbit/s
+)
 
 // NewFromIpfsHost returns a BitSwapNetwork supported by underlying IPFS host.
-func NewFromIpfsHost(host host.Host, r routing.ContentRouting, opts ...NetOpt) BitSwapNetwork {
+func NewFromIpfsHost(host host.Host, opts ...NetOpt) BitSwapNetwork {
 	s := processSettings(opts...)
 
 	bitswapNetwork := impl{
-		host:    host,
-		routing: r,
+		host: host,
 
 		protocolBitswapNoVers:  s.ProtocolPrefix + ProtocolBitswapNoVers,
 		protocolBitswapOneZero: s.ProtocolPrefix + ProtocolBitswapOneZero,
@@ -73,7 +69,6 @@ type impl struct {
 	stats Stats
 
 	host          host.Host
-	routing       routing.ContentRouting
 	connectEvtMgr *connectEventManager
 
 	protocolBitswapNoVers  protocol.ID
@@ -104,7 +99,7 @@ func (s *streamMessageSender) Connect(ctx context.Context) (network.Stream, erro
 	tctx, cancel := context.WithTimeout(ctx, s.opts.SendTimeout)
 	defer cancel()
 
-	if err := s.bsnet.ConnectTo(tctx, s.to); err != nil {
+	if err := s.bsnet.Connect(ctx, peer.AddrInfo{ID: s.to}); err != nil {
 		return nil, err
 	}
 
@@ -179,10 +174,13 @@ func (s *streamMessageSender) multiAttempt(ctx context.Context, fn func() error)
 			return err
 		}
 
+		timer := time.NewTimer(s.opts.SendErrorBackoff)
+		defer timer.Stop()
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(s.opts.SendErrorBackoff):
+		case <-timer.C:
 			// wait a short time in case disconnect notifications are still propagating
 			log.Infof("send message to %s failed but context was not Done: %s", s.to, err)
 		}
@@ -284,7 +282,6 @@ func (bsnet *impl) NewMessageSender(ctx context.Context, p peer.ID, opts *Messag
 		_, err := sender.Connect(ctx)
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -320,12 +317,9 @@ func sendTimeout(size int) time.Duration {
 func (bsnet *impl) SendMessage(
 	ctx context.Context,
 	p peer.ID,
-	outgoing bsmsg.BitSwapMessage) error {
-
-	tctx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
-
-	s, err := bsnet.newStreamToPeer(tctx, p)
+	outgoing bsmsg.BitSwapMessage,
+) error {
+	s, err := bsnet.newStreamToPeer(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -357,7 +351,6 @@ func (bsnet *impl) Start(r ...Receiver) {
 	}
 	bsnet.host.Network().Notify((*netNotifiee)(bsnet))
 	bsnet.connectEvtMgr.Start()
-
 }
 
 func (bsnet *impl) Stop() {
@@ -365,38 +358,15 @@ func (bsnet *impl) Stop() {
 	bsnet.host.Network().StopNotify((*netNotifiee)(bsnet))
 }
 
-func (bsnet *impl) ConnectTo(ctx context.Context, p peer.ID) error {
-	return bsnet.host.Connect(ctx, peer.AddrInfo{ID: p})
+func (bsnet *impl) Connect(ctx context.Context, p peer.AddrInfo) error {
+	if p.ID == bsnet.host.ID() {
+		return nil
+	}
+	return bsnet.host.Connect(ctx, p)
 }
 
 func (bsnet *impl) DisconnectFrom(ctx context.Context, p peer.ID) error {
 	return bsnet.host.Network().ClosePeer(p)
-}
-
-// FindProvidersAsync returns a channel of providers for the given key.
-func (bsnet *impl) FindProvidersAsync(ctx context.Context, k cid.Cid, max int) <-chan peer.ID {
-	out := make(chan peer.ID, max)
-	go func() {
-		defer close(out)
-		providers := bsnet.routing.FindProvidersAsync(ctx, k, max)
-		for info := range providers {
-			if info.ID == bsnet.host.ID() {
-				continue // ignore self as provider
-			}
-			bsnet.host.Peerstore().AddAddrs(info.ID, info.Addrs, peerstore.TempAddrTTL)
-			select {
-			case <-ctx.Done():
-				return
-			case out <- info.ID:
-			}
-		}
-	}()
-	return out
-}
-
-// Provide provides the key to the network
-func (bsnet *impl) Provide(ctx context.Context, k cid.Cid) error {
-	return bsnet.routing.Provide(ctx, k, true)
 }
 
 // handleNewStream receives a new stream from the network.
@@ -452,12 +422,13 @@ func (nn *netNotifiee) impl() *impl {
 
 func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 	// ignore transient connections
-	if v.Stat().Transient {
+	if v.Stat().Limited {
 		return
 	}
 
 	nn.impl().connectEvtMgr.Connected(v.RemotePeer())
 }
+
 func (nn *netNotifiee) Disconnected(n network.Network, v network.Conn) {
 	// Only record a "disconnect" when we actually disconnect.
 	if n.Connectedness(v.RemotePeer()) == network.Connected {

@@ -11,7 +11,6 @@ import (
 	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
 	bsnet "github.com/stateless-minds/boxo/bitswap/network"
 
-	cid "github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
 	mockrouting "github.com/stateless-minds/boxo/routing/mock"
 
@@ -19,19 +18,17 @@ import (
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/peer"
 	protocol "github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/libp2p/go-libp2p/core/routing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 )
 
 // VirtualNetwork generates a new testnet instance - a fake network that
 // is used to simulate sending messages.
-func VirtualNetwork(rs mockrouting.Server, d delay.D) Network {
+func VirtualNetwork(d delay.D) Network {
 	return &network{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
 		clients:            make(map[peer.ID]*receiverQueue),
 		delay:              d,
-		routingserver:      rs,
 		isRateLimited:      false,
 		rateLimitGenerator: nil,
 		conns:              make(map[string]struct{}),
@@ -45,13 +42,12 @@ type RateLimitGenerator interface {
 
 // RateLimitedVirtualNetwork generates a testnet instance where nodes are rate
 // limited in the upload/download speed.
-func RateLimitedVirtualNetwork(rs mockrouting.Server, d delay.D, rateLimitGenerator RateLimitGenerator) Network {
+func RateLimitedVirtualNetwork(d delay.D, rateLimitGenerator RateLimitGenerator) Network {
 	return &network{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
 		rateLimiters:       make(map[peer.ID]map[peer.ID]*mocknet.RateLimiter),
 		clients:            make(map[peer.ID]*receiverQueue),
 		delay:              d,
-		routingserver:      rs,
 		isRateLimited:      true,
 		rateLimitGenerator: rateLimitGenerator,
 		conns:              make(map[string]struct{}),
@@ -63,7 +59,6 @@ type network struct {
 	latencies          map[peer.ID]map[peer.ID]time.Duration
 	rateLimiters       map[peer.ID]map[peer.ID]*mocknet.RateLimiter
 	clients            map[peer.ID]*receiverQueue
-	routingserver      mockrouting.Server
 	delay              delay.D
 	isRateLimited      bool
 	rateLimitGenerator RateLimitGenerator
@@ -105,7 +100,6 @@ func (n *network) Adapter(p tnet.Identity, opts ...bsnet.NetOpt) bsnet.BitSwapNe
 	client := &networkClient{
 		local:              p.ID(),
 		network:            n,
-		routing:            n.routingserver.Client(p),
 		supportedProtocols: s.SupportedProtocols,
 	}
 	n.clients[p.ID()] = &receiverQueue{receiver: client}
@@ -126,8 +120,8 @@ func (n *network) SendMessage(
 	ctx context.Context,
 	from peer.ID,
 	to peer.ID,
-	mes bsmsg.BitSwapMessage) error {
-
+	mes bsmsg.BitSwapMessage,
+) error {
 	mes = mes.Clone()
 
 	n.mu.Lock()
@@ -192,7 +186,6 @@ type networkClient struct {
 	local              peer.ID
 	receivers          []bsnet.Receiver
 	network            *network
-	routing            routing.Routing
 	supportedProtocols []protocol.ID
 }
 
@@ -213,6 +206,7 @@ func (nc *networkClient) PeerConnected(p peer.ID) {
 		v.PeerConnected(p)
 	}
 }
+
 func (nc *networkClient) PeerDisconnected(p peer.ID) {
 	for _, v := range nc.receivers {
 		v.PeerDisconnected(p)
@@ -236,7 +230,8 @@ func (nc *networkClient) Latency(p peer.ID) time.Duration {
 func (nc *networkClient) SendMessage(
 	ctx context.Context,
 	to peer.ID,
-	message bsmsg.BitSwapMessage) error {
+	message bsmsg.BitSwapMessage,
+) error {
 	if err := nc.network.SendMessage(ctx, nc.local, to, message); err != nil {
 		return err
 	}
@@ -249,27 +244,6 @@ func (nc *networkClient) Stats() bsnet.Stats {
 		MessagesRecvd: atomic.LoadUint64(&nc.stats.MessagesRecvd),
 		MessagesSent:  atomic.LoadUint64(&nc.stats.MessagesSent),
 	}
-}
-
-// FindProvidersAsync returns a channel of providers for the given key.
-func (nc *networkClient) FindProvidersAsync(ctx context.Context, k cid.Cid, max int) <-chan peer.ID {
-	// NB: this function duplicates the AddrInfo -> ID transformation in the
-	// bitswap network adapter. Not to worry. This network client will be
-	// deprecated once the ipfsnet.Mock is added. The code below is only
-	// temporary.
-
-	out := make(chan peer.ID)
-	go func() {
-		defer close(out)
-		providers := nc.routing.FindProvidersAsync(ctx, k, max)
-		for info := range providers {
-			select {
-			case <-ctx.Done():
-			case out <- info.ID:
-			}
-		}
-	}()
-	return out
 }
 
 func (nc *networkClient) ConnectionManager() connmgr.ConnManager {
@@ -320,11 +294,6 @@ func (nc *networkClient) NewMessageSender(ctx context.Context, p peer.ID, opts *
 	}, nil
 }
 
-// Provide provides the key to the network.
-func (nc *networkClient) Provide(ctx context.Context, k cid.Cid) error {
-	return nc.routing.Provide(ctx, k, true)
-}
-
 func (nc *networkClient) Start(r ...bsnet.Receiver) {
 	nc.receivers = r
 }
@@ -332,15 +301,15 @@ func (nc *networkClient) Start(r ...bsnet.Receiver) {
 func (nc *networkClient) Stop() {
 }
 
-func (nc *networkClient) ConnectTo(_ context.Context, p peer.ID) error {
+func (nc *networkClient) Connect(_ context.Context, p peer.AddrInfo) error {
 	nc.network.mu.Lock()
-	otherClient, ok := nc.network.clients[p]
+	otherClient, ok := nc.network.clients[p.ID]
 	if !ok {
 		nc.network.mu.Unlock()
 		return errors.New("no such peer in network")
 	}
 
-	tag := tagForPeers(nc.local, p)
+	tag := tagForPeers(nc.local, p.ID)
 	if _, ok := nc.network.conns[tag]; ok {
 		nc.network.mu.Unlock()
 		// log.Warning("ALREADY CONNECTED TO PEER (is this a reconnect? test lib needs fixing)")
@@ -350,7 +319,7 @@ func (nc *networkClient) ConnectTo(_ context.Context, p peer.ID) error {
 	nc.network.mu.Unlock()
 
 	otherClient.receiver.PeerConnected(nc.local)
-	nc.PeerConnected(p)
+	nc.PeerConnected(p.ID)
 	return nil
 }
 

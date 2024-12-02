@@ -2,13 +2,18 @@ package network_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	bsmsg "github.com/stateless-minds/boxo/bitswap/message"
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
+	bsnet "github.com/stateless-minds/boxo/bitswap/network"
+	"github.com/stateless-minds/boxo/bitswap/network/internal"
+	tn "github.com/stateless-minds/boxo/bitswap/testnet"
+	"github.com/ipfs/go-test/random"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -47,7 +52,8 @@ func newReceiver() *receiver {
 func (r *receiver) ReceiveMessage(
 	ctx context.Context,
 	sender peer.ID,
-	incoming bsmsg.BitSwapMessage) {
+	incoming bsmsg.BitSwapMessage,
+) {
 	r.lastSender = sender
 	r.lastMessage = incoming
 	select {
@@ -69,7 +75,7 @@ func (r *receiver) PeerDisconnected(p peer.ID) {
 	r.connectionEvent <- false
 }
 
-var errMockNetErr = fmt.Errorf("network err")
+var errMockNetErr = errors.New("network err")
 
 type ErrStream struct {
 	network.Stream
@@ -163,16 +169,13 @@ func (eh *ErrHost) setTimeoutState(timingOut bool) {
 }
 
 func TestMessageSendAndReceive(t *testing.T) {
-	test.Flaky(t)
-
 	// create network
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	mn := mocknet.New()
 	defer mn.Close()
-	mr := mockrouting.NewServer()
-	streamNet, err := tn.StreamNet(ctx, mn, mr)
+	streamNet, err := tn.StreamNet(ctx, mn)
 	if err != nil {
 		t.Fatal("Unable to setup network")
 	}
@@ -192,7 +195,7 @@ func TestMessageSendAndReceive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = bsnet1.ConnectTo(ctx, p2.ID())
+	err = bsnet1.Connect(ctx, peer.AddrInfo{ID: p2.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +204,7 @@ func TestMessageSendAndReceive(t *testing.T) {
 		t.Fatal("did not connect peer")
 	case <-r1.connectionEvent:
 	}
-	err = bsnet2.ConnectTo(ctx, p1.ID())
+	err = bsnet2.Connect(ctx, peer.AddrInfo{ID: p1.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,9 +219,10 @@ func TestMessageSendAndReceive(t *testing.T) {
 	if _, ok := r2.peers[p1.ID()]; !ok {
 		t.Fatal("did to connect to correct peer")
 	}
-	blockGenerator := blocksutil.NewBlockGenerator()
-	block1 := blockGenerator.Next()
-	block2 := blockGenerator.Next()
+	randBlocks := random.BlocksOfSize(2, 4)
+	block1 := randBlocks[0]
+	block2 := randBlocks[1]
+
 	sent := bsmsg.New(false)
 	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
 	sent.AddBlock(block2)
@@ -275,7 +279,6 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	// create network
 	mn := mocknet.New()
 	defer mn.Close()
-	mr := mockrouting.NewServer()
 
 	// Host 1
 	h1, err := mn.AddPeer(p1.PrivateKey(), p1.Address())
@@ -283,8 +286,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh1 := &ErrHost{Host: h1}
-	routing1 := mr.ClientWithDatastore(context.TODO(), p1, ds.NewMapDatastore())
-	bsnet1 := bsnet.NewFromIpfsHost(eh1, routing1)
+	bsnet1 := bsnet.NewFromIpfsHost(eh1)
 	bsnet1.Start(r1)
 	t.Cleanup(bsnet1.Stop)
 	if r1.listener != nil {
@@ -297,8 +299,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh2 := &ErrHost{Host: h2}
-	routing2 := mr.ClientWithDatastore(context.TODO(), p2, ds.NewMapDatastore())
-	bsnet2 := bsnet.NewFromIpfsHost(eh2, routing2)
+	bsnet2 := bsnet.NewFromIpfsHost(eh2)
 	bsnet2.Start(r2)
 	t.Cleanup(bsnet2.Stop)
 	if r2.listener != nil {
@@ -310,7 +311,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = bsnet1.ConnectTo(ctx, p2.ID())
+	err = bsnet1.Connect(ctx, peer.AddrInfo{ID: p2.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,13 +320,12 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal("Expected connect event")
 	}
 
-	err = bsnet2.ConnectTo(ctx, p1.ID())
+	err = bsnet2.Connect(ctx, peer.AddrInfo{ID: p1.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blockGenerator := blocksutil.NewBlockGenerator()
-	block1 := blockGenerator.Next()
+	block1 := random.BlocksOfSize(1, 4)[0]
 	msg := bsmsg.New(false)
 	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
 
@@ -333,8 +333,6 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 }
 
 func TestMessageResendAfterError(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -381,8 +379,6 @@ func TestMessageResendAfterError(t *testing.T) {
 }
 
 func TestMessageSendTimeout(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -424,8 +420,6 @@ func TestMessageSendTimeout(t *testing.T) {
 }
 
 func TestMessageSendNotSupportedResponse(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -458,13 +452,10 @@ func TestMessageSendNotSupportedResponse(t *testing.T) {
 }
 
 func TestSupportsHave(t *testing.T) {
-	test.Flaky(t)
-
 	ctx := context.Background()
 	mn := mocknet.New()
 	defer mn.Close()
-	mr := mockrouting.NewServer()
-	streamNet, err := tn.StreamNet(ctx, mn, mr)
+	streamNet, err := tn.StreamNet(ctx, mn)
 	if err != nil {
 		t.Fatalf("Unable to setup network: %s", err)
 	}
@@ -674,8 +665,6 @@ func testNetworkCounters(t *testing.T, n1 int, n2 int) {
 }
 
 func TestNetworkCounters(t *testing.T) {
-	test.Flaky(t)
-
 	for n := 0; n < 11; n++ {
 		testNetworkCounters(t, 10-n, n)
 	}

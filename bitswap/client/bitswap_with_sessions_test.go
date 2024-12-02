@@ -2,32 +2,38 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	blocks "github.com/ipfs/go-block-format"
-	cid "github.com/ipfs/go-cid"
-	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
-	delay "github.com/ipfs/go-ipfs-delay"
-	tu "github.com/libp2p/go-libp2p-testing/etc"
 	"github.com/stateless-minds/boxo/bitswap"
+	"github.com/stateless-minds/boxo/bitswap/client"
 	"github.com/stateless-minds/boxo/bitswap/client/internal/session"
+	"github.com/stateless-minds/boxo/bitswap/client/traceability"
 	testinstance "github.com/stateless-minds/boxo/bitswap/testinstance"
 	tn "github.com/stateless-minds/boxo/bitswap/testnet"
-	"github.com/stateless-minds/boxo/internal/test"
 	mockrouting "github.com/stateless-minds/boxo/routing/mock"
+	"github.com/stateless-minds/boxo/routing/providerquerymanager"
+	blocks "github.com/ipfs/go-block-format"
+	cid "github.com/ipfs/go-cid"
+	delay "github.com/ipfs/go-ipfs-delay"
+	"github.com/ipfs/go-test/random"
+	tu "github.com/libp2p/go-libp2p-testing/etc"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+const blockSize = 4
 
 func getVirtualNetwork() tn.Network {
 	// FIXME: the tests are really sensitive to the network delay. fix them to work
 	// well under varying conditions
-	return tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(0))
+	return tn.VirtualNetwork(delay.Fixed(0))
 }
 
 func addBlock(t *testing.T, ctx context.Context, inst testinstance.Instance, blk blocks.Block) {
 	t.Helper()
-	err := inst.Blockstore().Put(ctx, blk)
+	err := inst.Blockstore.Put(ctx, blk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,27 +41,29 @@ func addBlock(t *testing.T, ctx context.Context, inst testinstance.Instance, blk
 	if err != nil {
 		t.Fatal(err)
 	}
+	err = inst.Routing.Provide(ctx, blk.Cid(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBasicSessions(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
-	block := bgen.Next()
+	block := random.BlocksOfSize(1, blockSize)[0]
 	inst := ig.Instances(2)
 
 	a := inst[0]
 	b := inst[1]
 
 	// Add a block to Peer B
-	if err := b.Blockstore().Put(ctx, block); err != nil {
+	if err := b.Blockstore.Put(ctx, block); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,9 +79,18 @@ func TestBasicSessions(t *testing.T) {
 	if !blkout.Cid().Equals(block.Cid()) {
 		t.Fatal("got wrong block")
 	}
+
+	traceBlock, ok := blkout.(traceability.Block)
+	if !ok {
+		t.Fatal("did not get tracable block")
+	}
+
+	if traceBlock.From != b.Identity.ID() {
+		t.Fatal("should have received block from peer B, did not")
+	}
 }
 
-func assertBlockLists(got, exp []blocks.Block) error {
+func assertBlockListsFrom(from peer.ID, got, exp []blocks.Block) error {
 	if len(got) != len(exp) {
 		return fmt.Errorf("got wrong number of blocks, %d != %d", len(got), len(exp))
 	}
@@ -81,6 +98,13 @@ func assertBlockLists(got, exp []blocks.Block) error {
 	h := cid.NewSet()
 	for _, b := range got {
 		h.Add(b.Cid())
+		traceableBlock, ok := b.(traceability.Block)
+		if !ok {
+			return fmt.Errorf("not a traceable block: %s", b.Cid())
+		}
+		if traceableBlock.From != from {
+			return fmt.Errorf("incorrect peer sent block, expect %s, got %s", from, traceableBlock.From)
+		}
 	}
 	for _, b := range exp {
 		if !h.Has(b.Cid()) {
@@ -90,22 +114,76 @@ func assertBlockLists(got, exp []blocks.Block) error {
 	return nil
 }
 
-func TestSessionBetweenPeers(t *testing.T) {
-	test.Flaky(t)
-
+// TestCustomProviderQueryManager tests that nothing breaks if we use a custom
+// PQM when creating bitswap.
+func TestCustomProviderQueryManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	vnet := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(time.Millisecond))
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, []bitswap.Option{bitswap.SetSimulateDontHavesOnTimeout(false)})
+	vnet := getVirtualNetwork()
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
+
+	block := random.BlocksOfSize(1, blockSize)[0]
+	a := ig.Next()
+	b := ig.Next()
+
+	// Replace bitswap in instance a with our customized one.
+	pqm, err := providerquerymanager.New(ctx, a.Adapter, router.Client(a.Identity))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pqm.Startup()
+	bs := bitswap.New(ctx, a.Adapter, pqm, a.Blockstore,
+		bitswap.WithClientOption(client.WithDefaultProviderQueryManager(false)))
+	a.Exchange.Close() // close old to be sure.
+	a.Exchange = bs
+	// Connect instances only after bitswap exists.
+	testinstance.ConnectInstances([]testinstance.Instance{a, b})
+
+	// Add a block to Peer B
+	if err := b.Blockstore.Put(ctx, block); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a session on Peer A
+	sesa := a.Exchange.NewSession(ctx)
+
+	// Get the block
+	blkout, err := sesa.GetBlock(ctx, block.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !blkout.Cid().Equals(block.Cid()) {
+		t.Fatal("got wrong block")
+	}
+
+	traceBlock, ok := blkout.(traceability.Block)
+	if !ok {
+		t.Fatal("did not get tracable block")
+	}
+
+	if traceBlock.From != b.Identity.ID() {
+		t.Fatal("should have received block from peer B, did not")
+	}
+}
+
+func TestSessionBetweenPeers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vnet := tn.VirtualNetwork(delay.Fixed(time.Millisecond))
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, []bitswap.Option{bitswap.SetSimulateDontHavesOnTimeout(false)})
+	defer ig.Close()
 
 	inst := ig.Instances(10)
 
 	// Add 101 blocks to Peer A
-	blks := bgen.Blocks(101)
-	if err := inst[0].Blockstore().PutMany(ctx, blks); err != nil {
+	blks := random.BlocksOfSize(101, blockSize)
+	if err := inst[0].Blockstore.PutMany(ctx, blks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +211,7 @@ func TestSessionBetweenPeers(t *testing.T) {
 		for b := range ch {
 			got = append(got, b)
 		}
-		if err := assertBlockLists(got, blks[i*10:(i+1)*10]); err != nil {
+		if err := assertBlockListsFrom(inst[0].Identity.ID(), got, blks[i*10:(i+1)*10]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,22 +231,20 @@ func TestSessionBetweenPeers(t *testing.T) {
 }
 
 func TestSessionSplitFetch(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
 	inst := ig.Instances(11)
 
 	// Add 10 distinct blocks to each of 10 peers
-	blks := bgen.Blocks(100)
+	blks := random.BlocksOfSize(100, blockSize)
 	for i := 0; i < 10; i++ {
-		if err := inst[i].Blockstore().PutMany(ctx, blks[i*10:(i+1)*10]); err != nil {
+		if err := inst[i].Blockstore.PutMany(ctx, blks[i*10:(i+1)*10]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -192,27 +268,25 @@ func TestSessionSplitFetch(t *testing.T) {
 		for b := range ch {
 			got = append(got, b)
 		}
-		if err := assertBlockLists(got, blks[i*10:(i+1)*10]); err != nil {
+		if err := assertBlockListsFrom(inst[i].Identity.ID(), got, blks[i*10:(i+1)*10]); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func TestFetchNotConnected(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, []bitswap.Option{bitswap.ProviderSearchDelay(10 * time.Millisecond)})
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, []bitswap.Option{bitswap.ProviderSearchDelay(10 * time.Millisecond)})
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
 	other := ig.Next()
 
 	// Provide 10 blocks on Peer A
-	blks := bgen.Blocks(10)
+	blks := random.BlocksOfSize(10, blockSize)
 	for _, block := range blks {
 		addBlock(t, ctx, other, block)
 	}
@@ -228,7 +302,6 @@ func TestFetchNotConnected(t *testing.T) {
 	thisNode := ig.Next()
 	ses := thisNode.Exchange.NewSession(ctx).(*session.Session)
 	ses.SetBaseTickDelay(time.Millisecond * 10)
-
 	ch, err := ses.GetBlocks(ctx, cids)
 	if err != nil {
 		t.Fatal(err)
@@ -238,31 +311,29 @@ func TestFetchNotConnected(t *testing.T) {
 	for b := range ch {
 		got = append(got, b)
 	}
-	if err := assertBlockLists(got, blks); err != nil {
+	if err := assertBlockListsFrom(other.Identity.ID(), got, blks); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestFetchAfterDisconnect(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, []bitswap.Option{
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, []bitswap.Option{
 		bitswap.ProviderSearchDelay(10 * time.Millisecond),
 		bitswap.RebroadcastDelay(delay.Fixed(15 * time.Millisecond)),
 	})
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
 	inst := ig.Instances(2)
 	peerA := inst[0]
 	peerB := inst[1]
 
 	// Provide 5 blocks on Peer A
-	blks := bgen.Blocks(10)
+	blks := random.BlocksOfSize(10, blockSize)
 	var cids []cid.Cid
 	for _, blk := range blks {
 		cids = append(cids, blk.Cid())
@@ -289,12 +360,12 @@ func TestFetchAfterDisconnect(t *testing.T) {
 		got = append(got, b)
 	}
 
-	if err := assertBlockLists(got, blks[:5]); err != nil {
+	if err := assertBlockListsFrom(peerA.Identity.ID(), got, blks[:5]); err != nil {
 		t.Fatal(err)
 	}
 
 	// Break connection
-	err = peerA.Adapter.DisconnectFrom(ctx, peerB.Peer)
+	err = peerA.Adapter.DisconnectFrom(ctx, peerB.Identity.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,23 +389,21 @@ func TestFetchAfterDisconnect(t *testing.T) {
 		}
 	}
 
-	if err := assertBlockLists(got, blks); err != nil {
+	if err := assertBlockListsFrom(peerA.Identity.ID(), got, blks); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestInterestCacheOverflow(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
-	blks := bgen.Blocks(2049)
+	blks := random.BlocksOfSize(2049, blockSize)
 	inst := ig.Instances(2)
 
 	a := inst[0]
@@ -376,17 +445,15 @@ func TestInterestCacheOverflow(t *testing.T) {
 }
 
 func TestPutAfterSessionCacheEvict(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
-	blks := bgen.Blocks(2500)
+	blks := random.BlocksOfSize(2500, blockSize)
 	inst := ig.Instances(1)
 
 	a := inst[0]
@@ -416,17 +483,15 @@ func TestPutAfterSessionCacheEvict(t *testing.T) {
 }
 
 func TestMultipleSessions(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
-	blk := bgen.Blocks(1)[0]
+	blk := random.BlocksOfSize(1, blockSize)[0]
 	inst := ig.Instances(2)
 
 	a := inst[0]
@@ -459,17 +524,15 @@ func TestMultipleSessions(t *testing.T) {
 }
 
 func TestWantlistClearsOnCancel(t *testing.T) {
-	test.Flaky(t)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
 	vnet := getVirtualNetwork()
-	ig := testinstance.NewTestInstanceGenerator(vnet, nil, nil)
+	router := mockrouting.NewServer()
+	ig := testinstance.NewTestInstanceGenerator(vnet, router, nil, nil)
 	defer ig.Close()
-	bgen := blocksutil.NewBlockGenerator()
 
-	blks := bgen.Blocks(10)
+	blks := random.BlocksOfSize(10, blockSize)
 	var cids []cid.Cid
 	for _, blk := range blks {
 		cids = append(cids, blk.Cid())
@@ -490,7 +553,7 @@ func TestWantlistClearsOnCancel(t *testing.T) {
 
 	if err := tu.WaitFor(ctx, func() error {
 		if len(a.Exchange.GetWantlist()) > 0 {
-			return fmt.Errorf("expected empty wantlist")
+			return errors.New("expected empty wantlist")
 		}
 		return nil
 	}); err != nil {

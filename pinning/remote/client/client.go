@@ -2,18 +2,16 @@ package go_pinning_service_http_client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/pkg/errors"
-
+	"github.com/stateless-minds/boxo/pinning/remote/client/openapi"
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multibase"
-	"github.com/stateless-minds/boxo/pinning/remote/client/openapi"
-
-	logging "github.com/ipfs/go-log/v2"
 )
 
 var logger = logging.Logger("pinning-service-http-client")
@@ -114,8 +112,10 @@ func (pinLsOpts) FilterAfter(t time.Time) LsOption {
 	}
 }
 
-const recordLimit = 1000
-const defaultLimit = 10
+const (
+	recordLimit  = 1000
+	defaultLimit = 10
+)
 
 func (pinLsOpts) Limit(limit int) LsOption {
 	return func(options *lsSettings) error {
@@ -416,13 +416,13 @@ func httperr(resp *http.Response, e error) error {
 	if ok {
 		ferr, ok := oerr.Model().(openapi.Failure)
 		if ok {
-			return errors.Wrapf(e, "reason: %q, details: %q", ferr.Error.GetReason(), ferr.Error.GetDetails())
+			return fmt.Errorf("reason: %q, details: %q: %w", ferr.Error.GetReason(), ferr.Error.GetDetails(), e)
 		}
 	}
 
 	if resp == nil {
-		return errors.Wrapf(e, "empty response from remote pinning service")
+		return fmt.Errorf("empty response from remote pinning service: %w", e)
 	}
 
-	return errors.Wrapf(e, "remote pinning service returned http error %d", resp.StatusCode)
+	return fmt.Errorf("remote pinning service returned http error %d: %w", resp.StatusCode, e)
 }

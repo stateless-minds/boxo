@@ -11,12 +11,13 @@ import (
 	h "github.com/stateless-minds/boxo/ipld/unixfs/importer/helpers"
 	trickle "github.com/stateless-minds/boxo/ipld/unixfs/importer/trickle"
 
-	cid "github.com/ipfs/go-cid"
-	ipld "github.com/ipfs/go-ipld-format"
-	mh "github.com/multiformats/go-multihash"
 	chunker "github.com/stateless-minds/boxo/chunker"
 	mdag "github.com/stateless-minds/boxo/ipld/merkledag"
 	mdagmock "github.com/stateless-minds/boxo/ipld/merkledag/test"
+	cid "github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
+	"github.com/ipfs/go-test/random"
+	mh "github.com/multiformats/go-multihash"
 	u "github.com/stateless-minds/boxo/util"
 )
 
@@ -85,14 +86,8 @@ func GetEmptyNode(t testing.TB, dserv ipld.DAGService, opts NodeOpts) ipld.Node 
 
 // GetRandomNode returns a random unixfs file node.
 func GetRandomNode(t testing.TB, dserv ipld.DAGService, size int64, opts NodeOpts) ([]byte, ipld.Node) {
-	in := io.LimitReader(u.NewTimeSeededRand(), size)
-	buf, err := io.ReadAll(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	node := GetNode(t, dserv, buf, opts)
-	return buf, node
+	buf := random.Bytes(int(size))
+	return buf, GetNode(t, dserv, buf, opts)
 }
 
 // ArrComp checks if two byte slices are the same.

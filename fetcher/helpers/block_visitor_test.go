@@ -5,7 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-block-format"
+	testinstance "github.com/stateless-minds/boxo/bitswap/testinstance"
+	tn "github.com/stateless-minds/boxo/bitswap/testnet"
+	"github.com/stateless-minds/boxo/blockservice"
+	"github.com/stateless-minds/boxo/fetcher/helpers"
+	bsfetcher "github.com/stateless-minds/boxo/fetcher/impl/blockservice"
+	"github.com/stateless-minds/boxo/fetcher/testutil"
+	mockrouting "github.com/stateless-minds/boxo/routing/mock"
+	blocks "github.com/ipfs/go-block-format"
 	delay "github.com/ipfs/go-ipfs-delay"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/fluent"
@@ -44,8 +51,9 @@ func TestFetchGraphToBlocks(t *testing.T) {
 		})
 	}))
 
-	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(0*time.Millisecond))
-	ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+	routing := mockrouting.NewServer()
+	net := tn.VirtualNetwork(delay.Fixed(0 * time.Millisecond))
+	ig := testinstance.NewTestInstanceGenerator(net, routing, nil, nil)
 	defer ig.Close()
 
 	peers := ig.Instances(2)
@@ -53,7 +61,7 @@ func TestFetchGraphToBlocks(t *testing.T) {
 	defer hasBlock.Exchange.Close()
 
 	blocks := []blocks.Block{block1, block2, block3, block4}
-	err := hasBlock.Blockstore().PutMany(bg, blocks)
+	err := hasBlock.Blockstore.PutMany(bg, blocks)
 	require.NoError(t, err)
 	err = hasBlock.Exchange.NotifyNewBlocks(bg, blocks...)
 	require.NoError(t, err)
@@ -61,7 +69,7 @@ func TestFetchGraphToBlocks(t *testing.T) {
 	wantsBlock := peers[1]
 	defer wantsBlock.Exchange.Close()
 
-	wantsGetter := blockservice.New(wantsBlock.Blockstore(), wantsBlock.Exchange)
+	wantsGetter := blockservice.New(wantsBlock.Blockstore, wantsBlock.Exchange)
 	fetcherConfig := bsfetcher.NewFetcherConfig(wantsGetter)
 	session := fetcherConfig.NewSession(context.Background())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -94,15 +102,16 @@ func TestFetchGraphToUniqueBlocks(t *testing.T) {
 		})
 	}))
 
-	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(0*time.Millisecond))
-	ig := testinstance.NewTestInstanceGenerator(net, nil, nil)
+	routing := mockrouting.NewServer()
+	net := tn.VirtualNetwork(delay.Fixed(0 * time.Millisecond))
+	ig := testinstance.NewTestInstanceGenerator(net, routing, nil, nil)
 	defer ig.Close()
 
 	peers := ig.Instances(2)
 	hasBlock := peers[0]
 	defer hasBlock.Exchange.Close()
 
-	err := hasBlock.Blockstore().PutMany(bg, []blocks.Block{block1, block2, block3})
+	err := hasBlock.Blockstore.PutMany(bg, []blocks.Block{block1, block2, block3})
 	require.NoError(t, err)
 
 	err = hasBlock.Exchange.NotifyNewBlocks(bg, block1, block2, block3)
@@ -111,7 +120,7 @@ func TestFetchGraphToUniqueBlocks(t *testing.T) {
 	wantsBlock := peers[1]
 	defer wantsBlock.Exchange.Close()
 
-	wantsGetter := blockservice.New(wantsBlock.Blockstore(), wantsBlock.Exchange)
+	wantsGetter := blockservice.New(wantsBlock.Blockstore, wantsBlock.Exchange)
 	fetcherConfig := bsfetcher.NewFetcherConfig(wantsGetter)
 	session := fetcherConfig.NewSession(context.Background())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

@@ -43,7 +43,7 @@ func TestWebError(t *testing.T) {
 	t.Parallel()
 
 	// Create a handler to be able to test `webError`.
-	config := &Config{Headers: map[string][]string{}}
+	config := &Config{}
 
 	t.Run("429 Too Many Requests", func(t *testing.T) {
 		t.Parallel()
@@ -86,5 +86,39 @@ func TestWebError(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/blah", nil)
 		webError(w, r, config, err, http.StatusInternalServerError)
 		require.Equal(t, http.StatusTeapot, w.Result().StatusCode)
+	})
+
+	t.Run("Error is sent as HTML when 'Accept' header contains 'text/html'", func(t *testing.T) {
+		t.Parallel()
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/blah", nil)
+		r.Header.Set("Accept", "something/else, text/html")
+		webError(w, r, config, NewErrorStatusCodeFromStatus(http.StatusTeapot), http.StatusInternalServerError)
+		require.Equal(t, http.StatusTeapot, w.Result().StatusCode)
+		require.Contains(t, w.Result().Header.Get("Content-Type"), "text/html")
+	})
+
+	t.Run("Error is sent as plain text when 'Accept' header does not contain 'text/html'", func(t *testing.T) {
+		t.Parallel()
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/blah", nil)
+		r.Header.Set("Accept", "application/json")
+		webError(w, r, config, NewErrorStatusCodeFromStatus(http.StatusTeapot), http.StatusInternalServerError)
+		require.Equal(t, http.StatusTeapot, w.Result().StatusCode)
+		require.Contains(t, w.Result().Header.Get("Content-Type"), "text/plain")
+	})
+
+	t.Run("Error is sent as plain text when 'Accept' header contains 'text/html' and config.DisableHTMLErrors is true", func(t *testing.T) {
+		t.Parallel()
+
+		config := &Config{DisableHTMLErrors: true}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/blah", nil)
+		r.Header.Set("Accept", "something/else, text/html")
+		webError(w, r, config, NewErrorStatusCodeFromStatus(http.StatusTeapot), http.StatusInternalServerError)
+		require.Equal(t, http.StatusTeapot, w.Result().StatusCode)
+		require.Contains(t, w.Result().Header.Get("Content-Type"), "text/plain")
 	})
 }

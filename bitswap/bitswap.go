@@ -4,6 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/stateless-minds/boxo/bitswap/client"
+	"github.com/stateless-minds/boxo/bitswap/message"
+	"github.com/stateless-minds/boxo/bitswap/network"
+	"github.com/stateless-minds/boxo/bitswap/server"
+	"github.com/stateless-minds/boxo/bitswap/tracer"
 	"github.com/ipfs/go-metrics-interface"
 	"github.com/stateless-minds/boxo/bitswap/client"
 	"github.com/stateless-minds/boxo/bitswap/internal/defaults"
@@ -44,9 +49,10 @@ type bitswap interface {
 	WantlistForPeer(p peer.ID) []cid.Cid
 }
 
-var _ exchange.SessionExchange = (*Bitswap)(nil)
-var _ bitswap = (*Bitswap)(nil)
-var HasBlockBufferSize = defaults.HasBlockBufferSize
+var (
+	_ exchange.SessionExchange = (*Bitswap)(nil)
+	_ bitswap                  = (*Bitswap)(nil)
+)
 
 type Bitswap struct {
 	*client.Client
@@ -56,7 +62,7 @@ type Bitswap struct {
 	net    network.BitSwapNetwork
 }
 
-func New(ctx context.Context, net network.BitSwapNetwork, bstore blockstore.Blockstore, options ...Option) *Bitswap {
+func New(ctx context.Context, net network.BitSwapNetwork, providerFinder client.ProviderFinder, bstore blockstore.Blockstore, options ...Option) *Bitswap {
 	bs := &Bitswap{
 		net: net,
 	}
@@ -83,14 +89,10 @@ func New(ctx context.Context, net network.BitSwapNetwork, bstore blockstore.Bloc
 		serverOptions = append(serverOptions, server.WithTracer(tracer))
 	}
 
-	if HasBlockBufferSize != defaults.HasBlockBufferSize {
-		serverOptions = append(serverOptions, server.HasBlockBufferSize(HasBlockBufferSize))
-	}
-
 	ctx = metrics.CtxSubScope(ctx, "bitswap")
 
 	bs.Server = server.New(ctx, net, bstore, serverOptions...)
-	bs.Client = client.New(ctx, net, bstore, append(clientOptions, client.WithBlockReceivedNotifier(bs.Server))...)
+	bs.Client = client.New(ctx, net, providerFinder, bstore, append(clientOptions, client.WithBlockReceivedNotifier(bs.Server))...)
 	net.Start(bs) // use the polyfill receiver to log received errors and trace messages only once
 
 	return bs
@@ -113,7 +115,6 @@ type Stat struct {
 	MessagesReceived uint64
 	BlocksSent       uint64
 	DataSent         uint64
-	ProvideBufLen    int
 }
 
 func (bs *Bitswap) Stat() (*Stat, error) {
@@ -136,16 +137,14 @@ func (bs *Bitswap) Stat() (*Stat, error) {
 		Peers:            ss.Peers,
 		BlocksSent:       ss.BlocksSent,
 		DataSent:         ss.DataSent,
-		ProvideBufLen:    ss.ProvideBufLen,
 	}, nil
 }
 
 func (bs *Bitswap) Close() error {
 	bs.net.Stop()
-	return multierr.Combine(
-		bs.Client.Close(),
-		bs.Server.Close(),
-	)
+	bs.Client.Close()
+	bs.Server.Close()
+	return nil
 }
 
 func (bs *Bitswap) WantlistForPeer(p peer.ID) []cid.Cid {

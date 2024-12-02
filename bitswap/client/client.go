@@ -5,27 +5,14 @@ package client
 import (
 	"context"
 	"errors"
-
 	"sync"
 	"time"
 
-	delay "github.com/ipfs/go-ipfs-delay"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-
-	blocks "github.com/ipfs/go-block-format"
-	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
-	"github.com/ipfs/go-metrics-interface"
-	process "github.com/jbenet/goprocess"
-	procctx "github.com/jbenet/goprocess/context"
-	"github.com/libp2p/go-libp2p/core/peer"
 	bsbpm "github.com/stateless-minds/boxo/bitswap/client/internal/blockpresencemanager"
 	bsgetter "github.com/stateless-minds/boxo/bitswap/client/internal/getter"
 	bsmq "github.com/stateless-minds/boxo/bitswap/client/internal/messagequeue"
 	"github.com/stateless-minds/boxo/bitswap/client/internal/notifications"
 	bspm "github.com/stateless-minds/boxo/bitswap/client/internal/peermanager"
-	bspqm "github.com/stateless-minds/boxo/bitswap/client/internal/providerquerymanager"
 	bssession "github.com/stateless-minds/boxo/bitswap/client/internal/session"
 	bssim "github.com/stateless-minds/boxo/bitswap/client/internal/sessioninterestmanager"
 	bssm "github.com/stateless-minds/boxo/bitswap/client/internal/sessionmanager"
@@ -38,22 +25,38 @@ import (
 	"github.com/stateless-minds/boxo/bitswap/tracer"
 	blockstore "github.com/stateless-minds/boxo/blockstore"
 	exchange "github.com/stateless-minds/boxo/exchange"
+	rpqm "github.com/stateless-minds/boxo/routing/providerquerymanager"
+	blocks "github.com/ipfs/go-block-format"
+	"github.com/ipfs/go-cid"
+	delay "github.com/ipfs/go-ipfs-delay"
+	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/go-metrics-interface"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-var log = logging.Logger("bitswap-client")
+var log = logging.Logger("bitswap/client")
 
 // Option defines the functional option type that can be used to configure
 // bitswap instances
 type Option func(*Client)
 
-// ProviderSearchDelay overwrites the global provider search delay
+// ProviderSearchDelay sets the initial dely before triggering a provider
+// search to find more peers and broadcast the want list. It also partially
+// controls re-broadcasts delay when the session idles (does not receive any
+// blocks), but these have back-off logic to increase the interval. See
+// [defaults.ProvSearchDelay] for the default.
 func ProviderSearchDelay(newProvSearchDelay time.Duration) Option {
 	return func(bs *Client) {
 		bs.provSearchDelay = newProvSearchDelay
 	}
 }
 
-// RebroadcastDelay overwrites the global provider rebroadcast delay
+// RebroadcastDelay sets a custom delay for periodic search of a random want.
+// When the value ellapses, a random CID from the wantlist is chosen and the
+// client attempts to find more peers for it and sends them the single want.
+// [defaults.RebroadcastDelay] for the default.
 func RebroadcastDelay(newRebroadcastDelay delay.D) Option {
 	return func(bs *Client) {
 		bs.rebroadcastDelay = newRebroadcastDelay
@@ -81,6 +84,32 @@ func WithBlockReceivedNotifier(brn BlockReceivedNotifier) Option {
 	}
 }
 
+// WithoutDuplicatedBlockStats disable collecting counts of duplicated blocks
+// received. This counter requires triggering a blockstore.Has() call for
+// every block received by launching goroutines in parallel. In the worst case
+// (no caching/blooms etc), this is an expensive call for the datastore to
+// answer. In a normal case (caching), this has the power of evicting a
+// different block from intermediary caches. In the best case, it doesn't
+// affect performance. Use if this stat is not relevant.
+func WithoutDuplicatedBlockStats() Option {
+	return func(bs *Client) {
+		bs.skipDuplicatedBlocksStats = true
+	}
+}
+
+// WithDefaultProviderQueryManager indicates wether we should use a the
+// default ProviderQueryManager, a wrapper of the content Router which
+// provides bounded paralelism and limits for these lookups. The
+// ProviderQueryManager setup by default uses maxInProcessRequests = 6 and
+// maxProviders = 10.  To use a custom ProviderQueryManager, set to false and
+// wrap directly the content router provided with the WithContentRouting()
+// option. Only takes effect if WithContentRouting is set.
+func WithDefaultProviderQueryManager(defaultProviderQueryManager bool) Option {
+	return func(bs *Client) {
+		bs.defaultProviderQueryManager = defaultProviderQueryManager
+	}
+}
+
 type BlockReceivedNotifier interface {
 	// ReceivedBlocks notifies the decision engine that a peer is well-behaving
 	// and gave us useful data, potentially increasing its score and making us
@@ -88,8 +117,16 @@ type BlockReceivedNotifier interface {
 	ReceivedBlocks(peer.ID, []blocks.Block)
 }
 
+// ProviderFinder is a subset of
+// https://pkg.go.dev/github.com/libp2p/go-libp2p@v0.37.0/core/routing#ContentRouting
+type ProviderFinder interface {
+	FindProvidersAsync(context.Context, cid.Cid, int) <-chan peer.AddrInfo
+}
+
 // New initializes a Bitswap client that runs until client.Close is called.
-func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore.Blockstore, options ...Option) *Client {
+// The Content providerFinder paramteter can be nil to disable content-routing
+// lookups for content (rely only on bitswap for discovery).
+func New(parent context.Context, network bsnet.BitSwapNetwork, providerFinder ProviderFinder, bstore blockstore.Blockstore, options ...Option) *Client {
 	// important to use provided parent context (since it may include important
 	// loggable data). It's probably not a good idea to allow bitswap to be
 	// coupled to the concerns of the ipfs daemon in this way.
@@ -99,15 +136,30 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	// exclusively. We should probably find another way to share logging data
 	ctx, cancelFunc := context.WithCancel(parent)
 
-	px := process.WithTeardown(func() error {
-		return nil
-	})
+	bs := &Client{
+		network:                     network,
+		providerFinder:              providerFinder,
+		blockstore:                  bstore,
+		cancel:                      cancelFunc,
+		closing:                     make(chan struct{}),
+		counters:                    new(counters),
+		dupMetric:                   bmetrics.DupHist(ctx),
+		allMetric:                   bmetrics.AllHist(ctx),
+		provSearchDelay:             defaults.ProvSearchDelay,
+		rebroadcastDelay:            delay.Fixed(defaults.RebroadcastDelay),
+		simulateDontHavesOnTimeout:  true,
+		defaultProviderQueryManager: true,
+	}
+
+	// apply functional options before starting and running bitswap
+	for _, option := range options {
+		option(bs)
+	}
 
 	// onDontHaveTimeout is called when a want-block is sent to a peer that
 	// has an old version of Bitswap that doesn't support DONT_HAVE messages,
 	// or when no response is received within a timeout.
 	var sm *bssm.SessionManager
-	var bs *Client
 	onDontHaveTimeout := func(p peer.ID, dontHaves []cid.Cid) {
 		// Simulate a message arriving with DONT_HAVEs
 		if bs.simulateDontHavesOnTimeout {
@@ -121,7 +173,17 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := bspm.New(ctx, peerQueueFactory, network.Self())
-	pqm := bspqm.New(ctx, network)
+
+	if bs.providerFinder != nil && bs.defaultProviderQueryManager {
+		// network can do dialing.
+		pqm, err := rpqm.New(ctx, network, bs.providerFinder, rpqm.WithMaxProviders(10))
+		if err != nil {
+			// Should not be possible to hit this
+			panic(err)
+		}
+		pqm.Startup()
+		bs.pqm = pqm
+	}
 
 	sessionFactory := func(
 		sessctx context.Context,
@@ -134,8 +196,19 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 		notif notifications.PubSub,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
-		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
+		self peer.ID,
+	) bssm.Session {
+		// careful when bs.pqm is nil. Since we are type-casting it
+		// into session.ProviderFinder when passing it, it will become
+		// not nil. Related:
+		// https://groups.google.com/g/golang-nuts/c/wnH302gBa4I?pli=1
+		var sessionProvFinder bssession.ProviderFinder
+		if bs.pqm != nil {
+			sessionProvFinder = bs.pqm
+		} else if providerFinder != nil {
+			sessionProvFinder = providerFinder
+		}
+		return bssession.New(sessctx, sessmgr, id, spm, sessionProvFinder, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -143,39 +216,10 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 	notif := notifications.New()
 	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
 
-	bs = &Client{
-		blockstore:                 bstore,
-		network:                    network,
-		process:                    px,
-		pm:                         pm,
-		pqm:                        pqm,
-		sm:                         sm,
-		sim:                        sim,
-		notif:                      notif,
-		counters:                   new(counters),
-		dupMetric:                  bmetrics.DupHist(ctx),
-		allMetric:                  bmetrics.AllHist(ctx),
-		provSearchDelay:            defaults.ProvSearchDelay,
-		rebroadcastDelay:           delay.Fixed(time.Minute),
-		simulateDontHavesOnTimeout: true,
-	}
-
-	// apply functional options before starting and running bitswap
-	for _, option := range options {
-		option(bs)
-	}
-
-	bs.pqm.Startup()
-
-	// bind the context and process.
-	// do it over here to avoid closing before all setup is done.
-	go func() {
-		<-px.Closing() // process closes first
-		sm.Shutdown()
-		cancelFunc()
-		notif.Shutdown()
-	}()
-	procctx.CloseAfterContext(px, ctx) // parent cancelled first
+	bs.sm = sm
+	bs.notif = notif
+	bs.pm = pm
+	bs.sim = sim
 
 	return bs
 }
@@ -184,8 +228,11 @@ func New(parent context.Context, network bsnet.BitSwapNetwork, bstore blockstore
 type Client struct {
 	pm *bspm.PeerManager
 
+	providerFinder ProviderFinder
+
 	// the provider query manager manages requests to find providers
-	pqm *bspqm.ProviderQueryManager
+	pqm                         *rpqm.ProviderQueryManager
+	defaultProviderQueryManager bool
 
 	// network delivers messages on behalf of the session
 	network bsnet.BitSwapNetwork
@@ -197,7 +244,9 @@ type Client struct {
 	// manages channels of outgoing blocks for sessions
 	notif notifications.PubSub
 
-	process process.Process
+	cancel    context.CancelFunc
+	closing   chan struct{}
+	closeOnce sync.Once
 
 	// Counters for various statistics
 	counterLk sync.Mutex
@@ -227,6 +276,9 @@ type Client struct {
 
 	// whether we should actually simulate dont haves on request timeout
 	simulateDontHavesOnTimeout bool
+
+	// dupMetric will stay at 0
+	skipDuplicatedBlocksStats bool
 }
 
 type counters struct {
@@ -239,6 +291,7 @@ type counters struct {
 
 // GetBlock attempts to retrieve a particular block from peers within the
 // deadline enforced by the context.
+// It returns a [github.com/stateless-minds/boxo/bitswap/client/traceability.Block] assertable [blocks.Block].
 func (bs *Client) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error) {
 	ctx, span := internal.StartSpan(ctx, "GetBlock", trace.WithAttributes(attribute.String("Key", k.String())))
 	defer span.End()
@@ -248,6 +301,7 @@ func (bs *Client) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error)
 // GetBlocks returns a channel where the caller may receive blocks that
 // correspond to the provided |keys|. Returns an error if BitSwap is unable to
 // begin this request within the deadline enforced by the context.
+// It returns a [github.com/stateless-minds/boxo/bitswap/client/traceability.Block] assertable [blocks.Block].
 //
 // NB: Your request remains open until the context expires. To conserve
 // resources, provide a context with a reasonably short deadline (ie. not one
@@ -267,7 +321,7 @@ func (bs *Client) NotifyNewBlocks(ctx context.Context, blks ...blocks.Block) err
 	defer span.End()
 
 	select {
-	case <-bs.process.Closing():
+	case <-bs.closing:
 		return errors.New("bitswap is closed")
 	default:
 	}
@@ -284,15 +338,16 @@ func (bs *Client) NotifyNewBlocks(ctx context.Context, blks ...blocks.Block) err
 	// Publish the block to any Bitswap clients that had requested blocks.
 	// (the sessions use this pubsub mechanism to inform clients of incoming
 	// blocks)
-	bs.notif.Publish(blks...)
+	var zero peer.ID
+	bs.notif.Publish(zero, blks...)
 
 	return nil
 }
 
-// receiveBlocksFrom process blocks received from the network
+// receiveBlocksFrom processes blocks received from the network
 func (bs *Client) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []blocks.Block, haves []cid.Cid, dontHaves []cid.Cid) error {
 	select {
-	case <-bs.process.Closing():
+	case <-bs.closing:
 		return errors.New("bitswap is closed")
 	default:
 	}
@@ -325,7 +380,7 @@ func (bs *Client) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []bl
 	// (the sessions use this pubsub mechanism to inform clients of incoming
 	// blocks)
 	for _, b := range wanted {
-		bs.notif.Publish(b)
+		bs.notif.Publish(from, b)
 	}
 
 	for _, b := range wanted {
@@ -371,14 +426,17 @@ func (bs *Client) updateReceiveCounters(blocks []blocks.Block) {
 	// Check which blocks are in the datastore
 	// (Note: any errors from the blockstore are simply logged out in
 	// blockstoreHas())
-	blocksHas := bs.blockstoreHas(blocks)
+	var blocksHas []bool
+	if !bs.skipDuplicatedBlocksStats {
+		blocksHas = bs.blockstoreHas(blocks)
+	}
 
 	bs.counterLk.Lock()
 	defer bs.counterLk.Unlock()
 
 	// Do some accounting for each block
 	for i, b := range blocks {
-		has := blocksHas[i]
+		has := (blocksHas != nil) && blocksHas[i]
 
 		blkLen := len(b.RawData())
 		bs.allMetric.Observe(float64(blkLen))
@@ -442,7 +500,13 @@ func (bs *Client) ReceiveError(err error) {
 
 // Close is called to shutdown the Client
 func (bs *Client) Close() error {
-	return bs.process.Close()
+	bs.closeOnce.Do(func() {
+		close(bs.closing)
+		bs.sm.Shutdown()
+		bs.cancel()
+		bs.notif.Shutdown()
+	})
+	return nil
 }
 
 // GetWantlist returns the current local wantlist (both want-blocks and
@@ -471,7 +535,7 @@ func (bs *Client) IsOnline() bool {
 // block requests in a row. The session returned will have it's own GetBlocks
 // method, but the session will use the fact that the requests are related to
 // be more efficient in its requests to peers. If you are using a session
-// from go-blockservice, it will create a bitswap session automatically.
+// from blockservice, it will create a bitswap session automatically.
 func (bs *Client) NewSession(ctx context.Context) exchange.Fetcher {
 	ctx, span := internal.StartSpan(ctx, "NewSession")
 	defer span.End()

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	ipath "github.com/stateless-minds/boxo/coreiface/path"
+	"github.com/stateless-minds/boxo/path"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +16,6 @@ func TestDagJsonCborPreview(t *testing.T) {
 	backend, root := newMockBackend(t, "fixtures.car")
 
 	ts := newTestServerWithConfig(t, backend, Config{
-		Headers:   map[string][]string{},
 		NoDNSLink: false,
 		PublicGateways: map[string]*PublicGateway{
 			"example.com": {
@@ -31,10 +30,13 @@ func TestDagJsonCborPreview(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	resolvedPath, err := backend.resolvePathNoRootsReturned(ctx, ipath.Join(ipath.IpfsPath(root), "subdir", "dag-cbor-document"))
+	p, err := path.Join(path.FromCid(root), "subdir", "dag-cbor-document")
 	require.NoError(t, err)
 
-	cidStr := resolvedPath.Cid().String()
+	resolvedPath, err := backend.resolvePathNoRootsReturned(ctx, p)
+	require.NoError(t, err)
+
+	cidStr := resolvedPath.RootCid().String()
 
 	t.Run("path gateway normalizes to trailing slash", func(t *testing.T) {
 		t.Parallel()

@@ -57,7 +57,7 @@ type SessionManager struct {
 	notif                  notifications.PubSub
 
 	// Sessions
-	sessLk   sync.RWMutex
+	sessLk   sync.Mutex
 	sessions map[uint64]Session
 
 	// Session Index
@@ -69,8 +69,8 @@ type SessionManager struct {
 
 // New creates a new SessionManager.
 func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestManager *bssim.SessionInterestManager, peerManagerFactory PeerManagerFactory,
-	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID) *SessionManager {
-
+	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID,
+) *SessionManager {
 	return &SessionManager{
 		ctx:                    ctx,
 		sessionFactory:         sessionFactory,
@@ -88,7 +88,8 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 // session manager.
 func (sm *SessionManager) NewSession(ctx context.Context,
 	provSearchDelay time.Duration,
-	rebroadcastDelay delay.D) exchange.Fetcher {
+	rebroadcastDelay delay.D,
+) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 
 	ctx, span := internal.StartSpan(ctx, "SessionManager.NewSession", trace.WithAttributes(attribute.String("ID", strconv.FormatUint(id, 10))))
@@ -158,13 +159,13 @@ func (sm *SessionManager) ReceiveFrom(ctx context.Context, p peer.ID, blks []cid
 
 	// Notify each session that is interested in the blocks / HAVEs / DONT_HAVEs
 	for _, id := range sm.sessionInterestManager.InterestedSessions(blks, haves, dontHaves) {
-		sm.sessLk.RLock()
+		sm.sessLk.Lock()
 		if sm.sessions == nil { // check if SessionManager was shutdown
-			sm.sessLk.RUnlock()
+			sm.sessLk.Unlock()
 			return
 		}
 		sess, ok := sm.sessions[id]
-		sm.sessLk.RUnlock()
+		sm.sessLk.Unlock()
 
 		if ok {
 			sess.ReceiveFrom(p, blks, haves, dontHaves)

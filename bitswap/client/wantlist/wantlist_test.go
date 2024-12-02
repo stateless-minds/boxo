@@ -3,6 +3,7 @@ package wantlist
 import (
 	"testing"
 
+	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
 	cid "github.com/ipfs/go-cid"
 	pb "github.com/stateless-minds/boxo/bitswap/message/pb"
 	"github.com/stateless-minds/boxo/internal/test"
@@ -24,7 +25,6 @@ func init() {
 		}
 		testcids = append(testcids, c)
 	}
-
 }
 
 type wli interface {
@@ -42,8 +42,6 @@ func assertHasCid(t *testing.T, w wli, c cid.Cid) {
 }
 
 func TestBasicWantlist(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	if !wl.Add(testcids[0], 5, pb.Message_Wantlist_Block) {
@@ -81,8 +79,6 @@ func TestBasicWantlist(t *testing.T) {
 }
 
 func TestAddHaveThenBlock(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have)
@@ -98,8 +94,6 @@ func TestAddHaveThenBlock(t *testing.T) {
 }
 
 func TestAddBlockThenHave(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block)
@@ -115,8 +109,6 @@ func TestAddBlockThenHave(t *testing.T) {
 }
 
 func TestAddHaveThenRemoveBlock(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have)
@@ -129,8 +121,6 @@ func TestAddHaveThenRemoveBlock(t *testing.T) {
 }
 
 func TestAddBlockThenRemoveHave(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block)
@@ -146,8 +136,6 @@ func TestAddBlockThenRemoveHave(t *testing.T) {
 }
 
 func TestAddHaveThenRemoveAny(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have)
@@ -160,8 +148,6 @@ func TestAddHaveThenRemoveAny(t *testing.T) {
 }
 
 func TestAddBlockThenRemoveAny(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block)
@@ -173,57 +159,7 @@ func TestAddBlockThenRemoveAny(t *testing.T) {
 	}
 }
 
-func TestAbsort(t *testing.T) {
-	test.Flaky(t)
-
-	wl := New()
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block)
-	wl.Add(testcids[1], 4, pb.Message_Wantlist_Have)
-	wl.Add(testcids[2], 3, pb.Message_Wantlist_Have)
-
-	wl2 := New()
-	wl2.Add(testcids[0], 2, pb.Message_Wantlist_Have)
-	wl2.Add(testcids[1], 1, pb.Message_Wantlist_Block)
-
-	wl.Absorb(wl2)
-
-	e, ok := wl.Contains(testcids[0])
-	if !ok {
-		t.Fatal("expected to have ", testcids[0])
-	}
-	if e.Priority != 5 {
-		t.Fatal("expected priority 5")
-	}
-	if e.WantType != pb.Message_Wantlist_Block {
-		t.Fatal("expected type ", pb.Message_Wantlist_Block)
-	}
-
-	e, ok = wl.Contains(testcids[1])
-	if !ok {
-		t.Fatal("expected to have ", testcids[1])
-	}
-	if e.Priority != 1 {
-		t.Fatal("expected priority 1")
-	}
-	if e.WantType != pb.Message_Wantlist_Block {
-		t.Fatal("expected type ", pb.Message_Wantlist_Block)
-	}
-
-	e, ok = wl.Contains(testcids[2])
-	if !ok {
-		t.Fatal("expected to have ", testcids[2])
-	}
-	if e.Priority != 3 {
-		t.Fatal("expected priority 3")
-	}
-	if e.WantType != pb.Message_Wantlist_Have {
-		t.Fatal("expected type ", pb.Message_Wantlist_Have)
-	}
-}
-
 func TestSortEntries(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 3, pb.Message_Wantlist_Block)
@@ -236,13 +172,10 @@ func TestSortEntries(t *testing.T) {
 		!entries[2].Cid.Equals(testcids[0]) {
 		t.Fatal("wrong order")
 	}
-
 }
 
 // Test adding and removing interleaved with checking entries to make sure we clear the cache.
 func TestCache(t *testing.T) {
-	test.Flaky(t)
-
 	wl := New()
 
 	wl.Add(testcids[0], 3, pb.Message_Wantlist_Block)
